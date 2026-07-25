@@ -281,7 +281,7 @@ func (m Model) activeTaskContextForSnapshot() *ipc.TaskContext {
 		return nil
 	}
 	active := state.ActiveTask(m.state)
-	if active == nil || !taskIsCodex(m.cfg, *active) {
+	if active == nil || !taskIsAgent(m.cfg, *active) {
 		return nil
 	}
 	record, ok := m.taskContexts[active.ID]
@@ -420,6 +420,12 @@ func (m *Model) newTaskWithSilent(title string, silent bool, typeIDs ...string) 
 		m.message = err.Error()
 		return nil
 	}
+	if definition, ok := tasktypes.ForKind(taskType.Kind); ok {
+		task = definition.InitializeTask(task)
+	}
+	next = state.WithUpdatedTask(next, task.ID, func(state.Task) state.Task {
+		return task
+	})
 	m.state = next
 	m.syncGroupCursorToTask(task.ID)
 	m.snapNavWidthToTarget()
@@ -1069,14 +1075,15 @@ func (m Model) taskCommandForTask(taskID string) string {
 
 func (m Model) taskEnvForTask(taskID string) map[string]string {
 	task := state.TaskByID(m.state, taskID)
-	if task == nil || !taskIsCodex(m.cfg, *task) {
+	if task == nil || !taskIsAgent(m.cfg, *task) {
 		return nil
 	}
+	kind := taskKindForTask(m.cfg, *task)
 	return map[string]string{
 		config.AppDirEnv:    m.runtime.Dir,
 		"WEFT_TASK_ID":      task.ID,
 		"WEFT_TASK_TYPE_ID": state.TaskTypeID(*task),
-		"WEFT_TASK_KIND":    tasktypes.KindCodex,
+		"WEFT_TASK_KIND":    kind,
 	}
 }
 
@@ -1129,7 +1136,7 @@ func (m Model) activeTerminalANSI(scrollback bool) string {
 		return footer
 	}
 	showCursor := m.state.Focus == state.FocusConsole && footer == ""
-	if task != nil && taskIsCodex(m.cfg, *task) {
+	if task != nil && taskIsAgent(m.cfg, *task) {
 		if scrollback {
 			return appendTerminalExitFooter(screen.CodexScrollbackANSIStringWithCursorGuide(showCursor), footer)
 		}
@@ -1150,7 +1157,7 @@ func (m Model) activeTerminalPlainLines(scrollback bool) []string {
 		return terminalExitFooterLines(footer)
 	}
 	var lines []string
-	if task != nil && taskIsCodex(m.cfg, *task) {
+	if task != nil && taskIsAgent(m.cfg, *task) {
 		if scrollback {
 			lines = screen.ScrollbackPlainLines()
 		} else {
@@ -1731,8 +1738,8 @@ func (m *Model) taskContextTarget(args map[string]string) (*state.Task, ipc.Resp
 	if task == nil {
 		return nil, ipc.ErrorResponse("task_not_found", "task not found: "+taskID)
 	}
-	if !taskIsCodex(m.cfg, *task) {
-		return nil, ipc.ErrorResponse("task_context_not_supported", "task notes are only supported for Codex tasks")
+	if !taskIsAgent(m.cfg, *task) {
+		return nil, ipc.ErrorResponse("task_context_not_supported", "task notes are only supported for agent tasks")
 	}
 	return task, ipc.Response{OK: true}
 }

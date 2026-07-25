@@ -124,6 +124,26 @@ func TestBuildUpgradeReportClassifiesTerminalActivity(t *testing.T) {
 	}
 }
 
+func TestBuildUpgradeReportClassifiesClaudeAsResumableAgent(t *testing.T) {
+	now := state.NowISO()
+	cfg := config.DefaultConfig()
+	st := state.State{
+		Version: state.Version,
+		Tasks: []state.Task{
+			{ID: "ready", TypeID: config.DefaultTaskTypeClaude, Title: "Claude Ready", Status: state.StatusReady, LiveStatus: "Ready", ResumeID: "550e8400-e29b-41d4-a716-446655440000", InputSubmitted: true, CreatedAt: now, UpdatedAt: now},
+			{ID: "working", TypeID: config.DefaultTaskTypeClaude, Title: "Claude Working", Status: state.StatusRunning, LiveStatus: "Working", ResumeID: "550e8400-e29b-41d4-a716-446655440001", InputSubmitted: true, CreatedAt: now, UpdatedAt: now},
+		},
+	}
+
+	report := BuildUpgradeReport(st, cfg, nil)
+	if report.CanUpgrade() || report.Total != 2 || report.Ready != 1 || len(report.Busy) != 1 || report.Busy[0].ID != "working" {
+		t.Fatalf("report = %#v", report)
+	}
+	if len(report.TerminalReady) != 0 || len(report.TerminalBusy) != 0 {
+		t.Fatalf("claude should not be classified as terminal: %#v", report)
+	}
+}
+
 func writeSessionMeta(t *testing.T, home string, name string, id string, cwd string, ts time.Time) {
 	t.Helper()
 	dir := filepath.Join(home, "sessions", "2026", "05", "31")

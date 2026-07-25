@@ -621,10 +621,10 @@ func upgradeResumeRestartMessage(reason string, resumeTasks int, freshTasks int,
 func upgradeResumeRestartAction(resumeTasks int, freshTasks int, terminalTasks int) string {
 	actions := []string{}
 	if resumeTasks > 0 {
-		actions = append(actions, fmt.Sprintf("resuming %d idle Codex task(s)", resumeTasks))
+		actions = append(actions, fmt.Sprintf("resuming %d idle agent task(s)", resumeTasks))
 	}
 	if freshTasks > 0 {
-		actions = append(actions, fmt.Sprintf("starting %d fresh Codex task(s)", freshTasks))
+		actions = append(actions, fmt.Sprintf("starting %d fresh agent task(s)", freshTasks))
 	}
 	if terminalTasks > 0 {
 		actions = append(actions, fmt.Sprintf("restarting %d idle shell task(s) with saved history/cwd", terminalTasks))
@@ -644,9 +644,9 @@ func upgradeResumeBlockedMessage(report codexsession.Report, st state.State) str
 		blockers = append(blockers, fmt.Sprintf("%d shell task(s) not idle", len(report.TerminalBusy)))
 	}
 	if len(blockers) == 0 {
-		return "Upgrade waits for idle, resumable Codex tasks and restartable idle shell task(s) before closing terminals and restarting the supervisor."
+		return "Upgrade waits for idle, resumable agent tasks and restartable idle shell task(s) before closing terminals and restarting the supervisor."
 	}
-	message := "Upgrade waits for idle, resumable Codex tasks and restartable idle shell task(s) before closing terminals and restarting the supervisor: " + strings.Join(blockers, ", ") + "."
+	message := "Upgrade waits for idle, resumable agent tasks and restartable idle shell task(s) before closing terminals and restarting the supervisor: " + strings.Join(blockers, ", ") + "."
 	if lines := blockingTaskLines(st, report); len(lines) > 0 {
 		message += "\n" + strings.Join(lines, "\n")
 	}

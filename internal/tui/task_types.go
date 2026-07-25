@@ -36,8 +36,8 @@ func taskKindForTask(cfg config.Config, task state.Task) string {
 	return strings.TrimSpace(taskTypeForTask(cfg, task).Kind)
 }
 
-func taskIsCodex(cfg config.Config, task state.Task) bool {
-	return taskKindForTask(cfg, task) == tasktypes.KindCodex
+func taskIsAgent(cfg config.Config, task state.Task) bool {
+	return taskDefinitionForTask(cfg, task).InputMode() == tasktypes.InputModeCodex
 }
 
 func taskTypeBadgeCellForTask(cfg config.Config, task state.Task) string {

@@ -65,7 +65,7 @@ That stack also supports task-specific features directly: workspace/group metada
 
 ## Supported Agents And Commands
 
-Weft supports Codex today.
+Weft supports Codex and Claude Code today. Install and authenticate the agent CLI you want to use, then choose `Codex` or `Claude` when creating a task.
 
 Additional agents can be added upon request. Config can also define generic shell command tasks, which are useful for tests, dev servers, logs, scripts, or any other command you want to keep visible beside agent work. Feedback on the workflow and docs is welcome in GitHub Issues.
 

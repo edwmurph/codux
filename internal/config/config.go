@@ -24,8 +24,10 @@ const (
 	defaultRuntimeDirectory = ".weft"
 	sourceRuntimeDirectory  = ".weft-runtime"
 	modulePath              = "github.com/edwmurph/weft"
+	DefaultTaskTypeClaude   = tasktypes.DefaultClaudeID
 	DefaultTaskTypeCodex    = tasktypes.DefaultCodexID
 	DefaultTaskTypeShell    = tasktypes.DefaultShellID
+	TaskKindClaude          = tasktypes.KindClaude
 	TaskKindCodex           = tasktypes.KindCodex
 	TaskKindTerminal        = tasktypes.KindTerminal
 )
@@ -135,6 +137,14 @@ func DefaultConfig() Config {
 
 func DefaultTaskTypes() map[string]TaskType {
 	return map[string]TaskType{
+		DefaultTaskTypeClaude: {
+			ID:            DefaultTaskTypeClaude,
+			Label:         "Claude",
+			Kind:          TaskKindClaude,
+			Command:       "claude",
+			Badge:         "[claude]",
+			TitleTemplate: "Claude {status}",
+		},
 		DefaultTaskTypeCodex: {
 			ID:            DefaultTaskTypeCodex,
 			Label:         "Codex",
@@ -431,6 +441,9 @@ func (c Config) Validate() error {
 	if _, ok := c.TaskTypes[DefaultTaskTypeCodex]; !ok {
 		return ConfigError{Message: "task_types.codex must be defined"}
 	}
+	if _, ok := c.TaskTypes[DefaultTaskTypeClaude]; !ok {
+		return ConfigError{Message: "task_types.claude must be defined"}
+	}
 	for id, taskType := range c.TaskTypes {
 		if !validTaskTypeID(id) {
 			return ConfigError{Message: fmt.Sprintf("task type id %q must contain only letters, numbers, dash, or underscore", id)}
@@ -545,7 +558,7 @@ func DefaultConfigText() string {
 
 default_task_type = "codex"
 
-# Optional command hook for generated titles. Weft sends each Codex task's first
+# Optional command hook for generated titles. Weft sends each agent task's first
 # submitted message, or each opted-in terminal task's first command, to this
 # command as JSON on stdin and uses the first non-empty stdout line as the
 # generated title for {auto}.
@@ -558,6 +571,13 @@ request_attention = "once"
 
 [task_context]
 enabled = true
+
+[task_types.claude]
+label = "Claude"
+kind = "claude"
+command = "claude"
+badge = "[claude]"
+title_template = "Claude {status}"
 
 [task_types.codex]
 label = "Codex"

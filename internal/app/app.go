@@ -142,7 +142,7 @@ func cliHelpText() string {
 	}
 	lines = append(lines,
 		"",
-		"Terminal dashboard for Codex and shell tasks.",
+		"Terminal dashboard for agents and shell commands.",
 		"",
 		"Usage:",
 		"  weft [--clear] [--attach|--no-attach]",
@@ -164,7 +164,7 @@ func cliHelpText() string {
 		"Tasks and organization:",
 		"  weft new [--type id] [title] Create a task.",
 		"  weft task notes preview set   Set a short note for Task Live Preview.",
-		"  weft task notes set <text>    Set the current Codex task heading note.",
+		"  weft task notes set <text>    Set the current agent task heading note.",
 		"  weft task notes detail set     Set longer notes for Task Tools.",
 		"  weft select <id>             Make a task active.",
 		"  weft rename [id] <title>     Rename the selected task or the given task.",

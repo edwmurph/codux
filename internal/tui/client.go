@@ -953,10 +953,10 @@ func workspaceUpgradeFooterText(upgrade *ipc.Upgrade, st state.State, cfg config
 		return appendUpgradeBridgeFooter(pendingUpgradeFooter(cfg, upgrade, delta, fmt.Sprintf("Wait for %d shell task(s) to become idle.", len(report.TerminalBusy)), st, report, scheduledActive), protocolBridge)
 	}
 	if len(report.Busy) > 0 {
-		return appendUpgradeBridgeFooter(pendingUpgradeFooter(cfg, upgrade, delta, fmt.Sprintf("Wait for %d Codex task(s) to become idle.", len(report.Busy)), st, report, scheduledActive), protocolBridge)
+		return appendUpgradeBridgeFooter(pendingUpgradeFooter(cfg, upgrade, delta, fmt.Sprintf("Wait for %d agent task(s) to become idle.", len(report.Busy)), st, report, scheduledActive), protocolBridge)
 	}
 	if len(report.Missing) > 0 {
-		return appendUpgradeBridgeFooter(pendingUpgradeFooter(cfg, upgrade, delta, fmt.Sprintf("Waiting for %d Codex session id(s).", len(report.Missing)), st, report, scheduledActive), protocolBridge)
+		return appendUpgradeBridgeFooter(pendingUpgradeFooter(cfg, upgrade, delta, fmt.Sprintf("Waiting for %d agent session id(s).", len(report.Missing)), st, report, scheduledActive), protocolBridge)
 	}
 	if action := upgradeReadyActionText(report); action != "" {
 		return appendUpgradeBridgeFooter(readyUpgradeFooter(upgrade, delta, fmt.Sprintf("Press U to upgrade and %s.", action)), protocolBridge)
@@ -1002,10 +1002,10 @@ func readyUpgradeFooter(upgrade *ipc.Upgrade, target string, action string) stri
 func upgradeReadyActionText(report codexsession.Report) string {
 	actions := []string{}
 	if report.Ready > 0 {
-		actions = append(actions, fmt.Sprintf("resume %d idle Codex task(s)", report.Ready))
+		actions = append(actions, fmt.Sprintf("resume %d idle agent task(s)", report.Ready))
 	}
 	if report.Fresh > 0 {
-		actions = append(actions, fmt.Sprintf("start %d fresh Codex task(s)", report.Fresh))
+		actions = append(actions, fmt.Sprintf("start %d fresh agent task(s)", report.Fresh))
 	}
 	if len(report.TerminalReady) > 0 {
 		actions = append(actions, fmt.Sprintf("restart %d idle shell task(s) with saved history/cwd", len(report.TerminalReady)))

@@ -27,6 +27,7 @@ Create an agent task from the CLI:
 
 ```sh
 weft new --type codex "Review the failing integration test"
+weft new --type claude "Trace the release regression"
 ```
 
 Create a shell task from the CLI:
@@ -37,7 +38,7 @@ weft new --type shell "Project shell"
 
 The default shell task starts an interactive login shell. Open it with `Enter`, run commands normally, then return to the dashboard with `C-b`.
 
-Persist short and medium status notes from inside a Weft-managed Codex task:
+Persist short and medium status notes from inside a Weft-managed agent task:
 
 ```sh
 weft task notes preview set "CI waiting"
@@ -50,7 +51,7 @@ Persist longer notes for Task Tools:
 printf '%s\n' "CI is still running." "Check the release notes before shipping." | weft task notes detail set
 ```
 
-Use `weft task notes preview show` to print the preview shortform, `weft task notes show` to print the console-heading medform, `weft task notes detail show` to print the longer notes, and the matching `clear` commands when any note is stale. `Task Live Preview` shows the preview shortform when set and falls back to the medform; the focused Codex `Task Console` shows the medform in its top border; `C-]` opens Task Tools with notes and console commands.
+Use `weft task notes preview show` to print the preview shortform, `weft task notes show` to print the console-heading medform, `weft task notes detail show` to print the longer notes, and the matching `clear` commands when any note is stale. `Task Live Preview` shows the preview shortform when set and falls back to the medform; the focused agent `Task Console` shows the medform in its top border; `C-]` opens Task Tools with notes and console commands.
 
 ## Common Commands
 
@@ -68,12 +69,12 @@ weft doctor memory           Diagnose supervisor and task memory use.
 
 Tasks and organization:
 weft new [--type id] [title] Create a task.
-weft task notes preview set Set a preview shortform note for the current Codex task.
-weft task notes set <text>   Set a console heading note for the current Codex task.
-weft task notes detail set   Set longer notes for the current Codex task.
-weft task notes preview show Show the preview note for the current Codex task.
-weft task notes show         Show the heading note for the current Codex task.
-weft task notes clear        Clear the heading note for the current Codex task.
+weft task notes preview set Set a preview shortform note for the current agent task.
+weft task notes set <text>   Set a console heading note for the current agent task.
+weft task notes detail set   Set longer notes for the current agent task.
+weft task notes preview show Show the preview note for the current agent task.
+weft task notes show         Show the heading note for the current agent task.
+weft task notes clear        Clear the heading note for the current agent task.
 weft select <id>             Make a task active.
 weft rename [id] <title>     Rename the selected task or the given task.
 weft close [id]              Close the active client or a task.
@@ -102,9 +103,9 @@ When the interactive dashboard is open, Weft sets the terminal tab title to `Wef
 
 After `brew upgrade weft`, reopen the dashboard with `weft`.
 
-If only the client needed to reopen, Weft is current. If an older background runtime is still running, the dashboard shows an upgrade banner. When running tasks are safe to resume or restart, Weft shows `U` as the upgrade action. If tasks are still busy, `U` can schedule auto-upgrade from the open dashboard; keep that dashboard open and Weft will run the same safe upgrade once every Codex task is idle/resumable and every shell task is idle.
+If only the client needed to reopen, Weft is current. If an older background runtime is still running, the dashboard shows an upgrade banner. When running tasks are safe to resume or restart, Weft shows `U` as the upgrade action. If tasks are still busy, `U` can schedule auto-upgrade from the open dashboard; keep that dashboard open and Weft will run the same safe upgrade once every agent task is idle/resumable and every shell task is idle.
 
-Codex agent tasks can be resumed after a confirmed dashboard upgrade when Weft has a saved resume id. Terminal tasks can restart only when idle, retaining prior scrollback as read-only history and launching from the latest OSC 7 cwd. This is not shell resume: jobs, environment mutations, shell variables, and unsubmitted input are not preserved, so finish important command work before upgrading.
+Codex and Claude agent tasks can be resumed after a confirmed dashboard upgrade when Weft has a saved resume id. Terminal tasks can restart only when idle, retaining prior scrollback as read-only history and launching from the latest OSC 7 cwd. This is not shell resume: jobs, environment mutations, shell variables, and unsubmitted input are not preserved, so finish important command work before upgrading.
 
 ## Key Diagnostics
 

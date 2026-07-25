@@ -98,8 +98,8 @@ func TestAutoTitleMaxColumnsAccountsForTaskSilentMarker(t *testing.T) {
 
 	got := autoTitleMaxColumns(cfg, st, st.Tasks[0], fixedWorkspacePaneWidth+defaultTasksPaneWidth+minCodexPaneWidth)
 
-	if got != 30 {
-		t.Fatalf("auto title columns = %d, want 30", got)
+	if got != 29 {
+		t.Fatalf("auto title columns = %d, want 29", got)
 	}
 }
 
@@ -585,14 +585,14 @@ func TestRenderWorkspacesPaneShowsVersionHeaderWithUpgradeFooter(t *testing.T) {
 
 	got := ansi.Strip(strings.Join(renderWorkspacesPaneWithOptions(cfg, st, 60, 12, workspaceRenderOptions{
 		workspaceInfoText:   "Weft\nCLI        7.13.6\nSupervisor 7.13.5",
-		workspaceFooterText: "Upgrade ready: supervisor 7.13.5 → 7.13.6.\nPress U to upgrade and resume 1 idle Codex task.",
+		workspaceFooterText: "Upgrade ready: supervisor 7.13.5 → 7.13.6.\nPress U to upgrade and resume 1 idle agent task.",
 	}), "\n"))
 	for _, expected := range []string{
 		"Weft",
 		"CLI        7.13.6",
 		"Supervisor 7.13.5",
 		"Upgrade ready: supervisor 7.13.5 → 7.13.6.",
-		"Press U to upgrade and resume 1 idle Codex task.",
+		"Press U to upgrade and resume 1 idle agent task.",
 	} {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("workspace pane missing %q:\n%s", expected, got)
@@ -669,7 +669,7 @@ func TestRenderWorkspacesPaneScrollsWorkspaceCardsBelowVersionHeader(t *testing.
 
 	got := ansi.Strip(strings.Join(renderWorkspacesPaneWithOptions(cfg, st, 60, 12, workspaceRenderOptions{
 		workspaceInfoText:   "Weft\nCLI        7.13.6\nSupervisor 7.13.5",
-		workspaceFooterText: "Upgrade ready: supervisor 7.13.5 → 7.13.6.\nPress U to upgrade and resume 1 idle Codex task.",
+		workspaceFooterText: "Upgrade ready: supervisor 7.13.5 → 7.13.6.\nPress U to upgrade and resume 1 idle agent task.",
 	}), "\n"))
 	for _, expected := range []string{"Weft", "CLI        7.13.6", "Supervisor 7.13.5", "Workspace 3", "Upgrade ready"} {
 		if !strings.Contains(got, expected) {
@@ -888,10 +888,10 @@ func TestRenderTasksPaneShowsTopLevelTasksAndEmptyState(t *testing.T) {
 
 	got := renderWorkspaceView(cfg, st, "alpha", "output", 100, 18, "", 60, 0, workspaceRenderOptions{})
 	stripped := ansi.Strip(got)
-	if !strings.Contains(stripped, "Tasks") || !strings.Contains(stripped, "+ New task") || !strings.Contains(stripped, "· [codex] alpha") || strings.Contains(stripped, "▾") {
+	if !strings.Contains(stripped, "Tasks") || !strings.Contains(stripped, "+ New task") || !strings.Contains(stripped, "· [codex]  alpha") || strings.Contains(stripped, "▾") {
 		t.Fatalf("top-level task rendering mismatch:\n%s", got)
 	}
-	if strings.Index(stripped, "+ New task") > strings.Index(stripped, "· [codex] alpha") {
+	if strings.Index(stripped, "+ New task") > strings.Index(stripped, "· [codex]  alpha") {
 		t.Fatalf("new task row should render above task rows:\n%s", stripped)
 	}
 
@@ -916,7 +916,7 @@ func TestRenderTasksPaneShowsTaskSilentMarker(t *testing.T) {
 	st.Tasks[0].Silent = true
 
 	got := ansi.Strip(strings.Join(renderGroupsPaneWithOptions(cfg, st, 44, 12, 0, workspaceRenderOptions{}), "\n"))
-	if !strings.Contains(got, "· ⊘ [codex] alpha") {
+	if !strings.Contains(got, "· ⊘ [codex]  alpha") {
 		t.Fatalf("silent task row missing marker:\n%s", got)
 	}
 }
@@ -947,27 +947,27 @@ func TestRenderTasksPaneMutesSilencedIdleTaskRows(t *testing.T) {
 	got := strings.Join(renderGroupsPaneWithOptions(cfg, st, 52, 16, 99, workspaceRenderOptions{}), "\n")
 
 	for _, expected := range []string{
-		mutedStyle.Render("· ⊘ [codex] Task Ready"),
-		mutedStyle.Render("◦ ⊘ [codex] Task Stopped"),
-		mutedStyle.Render("  · [codex] Group Ready"),
+		mutedStyle.Render("· ⊘ [codex]  Task Ready"),
+		mutedStyle.Render("◦ ⊘ [codex]  Task Stopped"),
+		mutedStyle.Render("  · [codex]  Group Ready"),
 	} {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("silenced idle task row should use muted style %q:\n%s", expected, got)
 		}
 	}
 	for _, forbidden := range []string{
-		taskReadyStyle.Render("· ⊘ [codex] Task Ready"),
-		taskAttentionStyle.Render("◦ ⊘ [codex] Task Stopped"),
-		taskReadyStyle.Render("  · [codex] Group Ready"),
+		taskReadyStyle.Render("· ⊘ [codex]  Task Ready"),
+		taskAttentionStyle.Render("◦ ⊘ [codex]  Task Stopped"),
+		taskReadyStyle.Render("  · [codex]  Group Ready"),
 	} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("silenced idle task row should not use attention style %q:\n%s", forbidden, got)
 		}
 	}
-	if !strings.Contains(got, taskRunningStyle.Render("⠋ ⊘ [codex] Task Running")) {
+	if !strings.Contains(got, taskRunningStyle.Render("⠋ ⊘ [codex]  Task Running")) {
 		t.Fatalf("active silenced task should keep active styling:\n%s", got)
 	}
-	if !strings.Contains(got, taskErrorStyle.Render("! ⊘ [codex] Task Error")) {
+	if !strings.Contains(got, taskErrorStyle.Render("! ⊘ [codex]  Task Error")) {
 		t.Fatalf("error silenced task should keep error styling:\n%s", got)
 	}
 }
@@ -1077,48 +1077,48 @@ func TestRenderTasksPaneAnimatesLoadingRowsAndColorsStatuses(t *testing.T) {
 		},
 	}), "\n")
 	stripped := ansi.Strip(got)
-	if !taskLineContains(stripped, "Booting", "⠼ [codex] 12s Booting") || strings.Contains(stripped, "· [codex] 12s Booting") {
+	if !taskLineContains(stripped, "Booting", "⠼ [codex]  12s Booting") || strings.Contains(stripped, "· [codex]  12s Booting") {
 		t.Fatalf("loading row should show operation duration after the badge:\n%s", stripped)
 	}
-	if !taskLineContains(stripped, "Review", "⠼ [codex] 2m Review") || strings.Contains(stripped, "· [codex] 2m Review") {
+	if !taskLineContains(stripped, "Review", "⠼ [codex]  2m Review") || strings.Contains(stripped, "· [codex]  2m Review") {
 		t.Fatalf("working row should show operation duration after the badge:\n%s", stripped)
 	}
-	if !taskLineContains(stripped, "Approval", "⠼ [codex] 1h2m Approval") || strings.Contains(stripped, "· [codex] 1h2m Approval") {
+	if !taskLineContains(stripped, "Approval", "⠼ [codex]  1h2m Approval") || strings.Contains(stripped, "· [codex]  1h2m Approval") {
 		t.Fatalf("waiting Codex row should show operation duration after the badge:\n%s", stripped)
 	}
-	if !taskLineContains(stripped, "Shell Awaiting", "⠼ [shell] 59s Shell Awaiting") || strings.Contains(stripped, "· [shell] 59s Shell Awaiting") {
+	if !taskLineContains(stripped, "Shell Awaiting", "⠼ [shell]  59s Shell Awaiting") || strings.Contains(stripped, "· [shell]  59s Shell Awaiting") {
 		t.Fatalf("waiting terminal row should show operation duration after the badge:\n%s", stripped)
 	}
-	if !strings.Contains(stripped, "· [codex] 9s Respond") || strings.Contains(stripped, "⠼ [codex] Respond") {
+	if !strings.Contains(stripped, "· [codex]  9s Respond") || strings.Contains(stripped, "⠼ [codex]  Respond") {
 		t.Fatalf("ready row should use the subtle ready marker instead of the spinner:\n%s", stripped)
 	}
-	if !strings.Contains(stripped, "! [codex] Broken") {
+	if !strings.Contains(stripped, "! [codex]  Broken") {
 		t.Fatalf("error row should use the error marker:\n%s", stripped)
 	}
 	if taskLineHasDurationToken(stripped, "Broken") {
 		t.Fatalf("error row should not show operation duration:\n%s", stripped)
 	}
-	if !strings.Contains(stripped, "◦ [codex] Paused") {
+	if !strings.Contains(stripped, "◦ [codex]  Paused") {
 		t.Fatalf("stopped row should use the attention marker:\n%s", stripped)
 	}
 	if taskLineHasDurationToken(stripped, "Paused") {
 		t.Fatalf("stopped row should not show operation duration:\n%s", stripped)
 	}
-	if !strings.Contains(stripped, "! [codex] Killed") {
+	if !strings.Contains(stripped, "! [codex]  Killed") {
 		t.Fatalf("killed row should use the attention marker:\n%s", stripped)
 	}
 	if taskLineHasDurationToken(stripped, "Killed") {
 		t.Fatalf("killed row should not show operation duration:\n%s", stripped)
 	}
 	for _, expected := range []string{
-		taskRunningStyle.Render("⠼ [codex] 12s Booting"),
-		taskWorkingStyle.Render("⠼ [codex] 2m Review"),
-		taskLoadingStyle.Render("⠼ [codex] 1h2m Approval"),
-		taskLoadingStyle.Render("⠼ [shell] 59s Shell Awaiting"),
-		taskReadyStyle.Render("· [codex] 9s Respond"),
-		taskErrorStyle.Render("! [codex] Broken"),
-		taskAttentionStyle.Render("◦ [codex] Paused"),
-		taskAttentionStyle.Render("! [codex] Killed"),
+		taskRunningStyle.Render("⠼ [codex]  12s Booting"),
+		taskWorkingStyle.Render("⠼ [codex]  2m Review"),
+		taskLoadingStyle.Render("⠼ [codex]  1h2m Approval"),
+		taskLoadingStyle.Render("⠼ [shell]  59s Shell Awaiting"),
+		taskReadyStyle.Render("· [codex]  9s Respond"),
+		taskErrorStyle.Render("! [codex]  Broken"),
+		taskAttentionStyle.Render("◦ [codex]  Paused"),
+		taskAttentionStyle.Render("! [codex]  Killed"),
 	} {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("tasks pane missing styled row %q:\n%s", expected, got)
@@ -1196,7 +1196,7 @@ func TestReadyTaskColorSurvivesSelectionAndActiveFallback(t *testing.T) {
 
 	const width = 42
 	rowWidth := width - 2 - (navHorizontalPadding * 2)
-	readyRow := "  · [codex] alpha"
+	readyRow := "  · [codex]  alpha"
 
 	selected := strings.Join(renderGroupsPaneWithOptions(cfg, st, width, 12, 2, workspaceRenderOptions{}), "\n")
 	expectedSelected := taskReadySelectedStyle.Render(padVisual(readyRow, rowWidth))

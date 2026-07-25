@@ -429,8 +429,8 @@ func TestUpgradeResumeRestartMessageIncludesShellRestart(t *testing.T) {
 	got := upgradeResumeRestartMessage(ipc.UpgradeReasonVersion, 1, 1, 2, "backup-1")
 
 	for _, expected := range []string{
-		"resuming 1 idle Codex task(s)",
-		"starting 1 fresh Codex task(s)",
+		"resuming 1 idle agent task(s)",
+		"starting 1 fresh agent task(s)",
 		"restarting 2 idle shell task(s) with saved history/cwd",
 		"Backup: backup-1",
 	} {

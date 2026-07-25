@@ -35,6 +35,13 @@ func TestEnsureConfigCreatesDefaults(t *testing.T) {
 	if codexType.Kind != TaskKindCodex || codexType.Command != "codex" || codexType.Badge != "[codex]" || codexType.TitleTemplate != "{live}" {
 		t.Fatalf("codex task type = %#v", codexType)
 	}
+	claudeType, ok := cfg.TaskTypes[DefaultTaskTypeClaude]
+	if !ok {
+		t.Fatalf("missing claude task type: %#v", cfg.TaskTypes)
+	}
+	if claudeType.Kind != TaskKindClaude || claudeType.Command != "claude" || claudeType.Badge != "[claude]" || claudeType.TitleTemplate != "Claude {status}" {
+		t.Fatalf("claude task type = %#v", claudeType)
+	}
 	shellType, ok := cfg.TaskTypes[DefaultTaskTypeShell]
 	if !ok {
 		t.Fatalf("missing shell task type: %#v", cfg.TaskTypes)
@@ -90,6 +97,7 @@ func TestEnsureConfigCreatesDefaults(t *testing.T) {
 		"\nrequest_attention = \"once\"",
 		"\n[task_context]",
 		"\nenabled = true",
+		"\n[task_types.claude]",
 		"\n[task_types.codex]",
 		"\n[task_types.shell]",
 		"\nnew_task = \"n\"",
@@ -235,15 +243,38 @@ command = "codex"
 	}
 }
 
-func TestLoadConfigRejectsUnsupportedIntegratedTaskKind(t *testing.T) {
+func TestLoadConfigSupportsClaudeIntegratedTaskKind(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	err := os.WriteFile(path, []byte(`
 [task_types.claude]
 label = "Claude"
 kind = "claude"
-command = "claude"
+command = "claude --model sonnet"
 badge = "[claude]"
-title_template = "Claude"
+title_template = "Claude {status}"
+`), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.TaskTypes[DefaultTaskTypeClaude]; got.Kind != TaskKindClaude || got.Command != "claude --model sonnet" || got.TitleTemplate != "Claude {status}" {
+		t.Fatalf("claude task type = %#v", got)
+	}
+}
+
+func TestLoadConfigRejectsUnsupportedIntegratedTaskKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	err := os.WriteFile(path, []byte(`
+[task_types.gemini]
+label = "Gemini"
+kind = "gemini"
+command = "gemini"
+badge = "[gemini]"
+title_template = "Gemini"
 `), 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +284,7 @@ title_template = "Claude"
 	if err == nil {
 		t.Fatal("expected unsupported task type error")
 	}
-	if !strings.Contains(err.Error(), `kind "claude" is not supported`) ||
+	if !strings.Contains(err.Error(), `kind "gemini" is not supported`) ||
 		!strings.Contains(err.Error(), `checked-in integrated type`) {
 		t.Fatalf("error = %v", err)
 	}

@@ -1,12 +1,41 @@
 package tasktypes
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/edwmurph/weft/internal/state"
 )
 
 func TestRegistryExposesBuiltInDefinitions(t *testing.T) {
+	claude, ok := ForKind(KindClaude)
+	if !ok {
+		t.Fatal("claude definition missing")
+	}
+	if claude.ConfiguredTypeID() != DefaultClaudeID || claude.InputMode() != InputModeCodex {
+		t.Fatalf("claude definition = %#v/%s", claude, claude.InputMode())
+	}
+	if policy := claude.StartPolicy(); policy.Status != state.StatusRunning || !policy.TrackOperation || policy.Visible {
+		t.Fatalf("claude start policy = %#v", policy)
+	}
+	initialized := claude.InitializeTask(state.Task{ID: "claude-task", WorkspaceID: "workspace", CreatedAt: "2026-07-25T12:00:00Z", Status: state.StatusStarting})
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(initialized.ResumeID) {
+		t.Fatalf("claude session id = %q", initialized.ResumeID)
+	}
+	if got := claude.Command("claude --model sonnet", initialized); got != "claude --model sonnet --session-id '"+initialized.ResumeID+"'" {
+		t.Fatalf("claude new command = %q", got)
+	}
+	initialized.Status = state.StatusReady
+	if got := claude.Command("claude --model sonnet", initialized); got != "claude --model sonnet --resume '"+initialized.ResumeID+"'" {
+		t.Fatalf("claude resume command = %q", got)
+	}
+	if got := claude.ScreenStatus("Claude Code\n❯ \n  ? for shortcuts"); got != "Ready" {
+		t.Fatalf("claude ready screen status = %q", got)
+	}
+	if got := claude.ScreenStatus("· Working…\n  Esc to interrupt"); got != "Working" {
+		t.Fatalf("claude working screen status = %q", got)
+	}
+
 	codex, ok := ForKind(KindCodex)
 	if !ok {
 		t.Fatal("codex definition missing")
@@ -36,6 +65,21 @@ func TestRegistryExposesBuiltInDefinitions(t *testing.T) {
 	}
 	if !terminal.TracksTerminalCWD() || !terminal.TracksForegroundCommands() || !terminal.RestartableTerminal() {
 		t.Fatalf("terminal capabilities missing")
+	}
+}
+
+func TestClaudeDefinitionTranslatesScreenIntoLiveStatus(t *testing.T) {
+	claude, ok := ForKind(KindClaude)
+	if !ok {
+		t.Fatal("claude definition missing")
+	}
+	task := claude.ApplyPTYTitle(state.Task{ID: "a", Status: state.StatusRunning}, "Claude Code", "Ready")
+	if task.LiveTitle != "Claude Code" || task.LiveStatus != "Ready" || task.Status != state.StatusReady {
+		t.Fatalf("ready claude task = %#v", task)
+	}
+	task = claude.ApplyPTYTitle(task, "", "Working")
+	if task.LiveStatus != "Working" || task.Status != state.StatusRunning {
+		t.Fatalf("working claude task = %#v", task)
 	}
 }
 

@@ -1,6 +1,9 @@
 package tasktypes
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -9,10 +12,12 @@ import (
 )
 
 const (
-	DefaultCodexID = "codex"
-	DefaultShellID = "shell"
-	KindCodex      = "codex"
-	KindTerminal   = "terminal"
+	DefaultClaudeID = "claude"
+	DefaultCodexID  = "codex"
+	DefaultShellID  = "shell"
+	KindClaude      = "claude"
+	KindCodex       = "codex"
+	KindTerminal    = "terminal"
 )
 
 type InputMode string
@@ -38,6 +43,7 @@ type Definition interface {
 	ConfiguredTypeID() string
 	InputMode() InputMode
 	StartPolicy() StartPolicy
+	InitializeTask(task state.Task) state.Task
 	Command(baseCommand string, task state.Task) string
 	ScreenStatus(screenContent string) string
 	ApplyPTYTitle(task state.Task, terminalTitle string, screenStatus string) state.Task
@@ -51,6 +57,7 @@ type Definition interface {
 }
 
 var registry = map[string]Definition{
+	KindClaude:   claudeDefinition{},
 	KindCodex:    codexDefinition{},
 	KindTerminal: terminalDefinition{},
 }
@@ -85,6 +92,10 @@ func (codexDefinition) InputMode() InputMode {
 
 func (codexDefinition) StartPolicy() StartPolicy {
 	return StartPolicy{Status: state.StatusRunning, TrackOperation: true}
+}
+
+func (codexDefinition) InitializeTask(task state.Task) state.Task {
+	return task
 }
 
 func (codexDefinition) Command(baseCommand string, task state.Task) string {
@@ -166,6 +177,98 @@ func (codexDefinition) RestartableTerminal() bool {
 	return false
 }
 
+type claudeDefinition struct{}
+
+func (claudeDefinition) Kind() string {
+	return KindClaude
+}
+
+func (claudeDefinition) ConfiguredTypeID() string {
+	return DefaultClaudeID
+}
+
+func (claudeDefinition) InputMode() InputMode {
+	return InputModeCodex
+}
+
+func (claudeDefinition) StartPolicy() StartPolicy {
+	return StartPolicy{Status: state.StatusRunning, TrackOperation: true}
+}
+
+func (claudeDefinition) InitializeTask(task state.Task) state.Task {
+	if strings.TrimSpace(task.ResumeID) == "" {
+		task.ResumeID = newClaudeSessionID(task)
+	}
+	return task
+}
+
+func (claudeDefinition) Command(baseCommand string, task state.Task) string {
+	if strings.TrimSpace(task.ResumeID) == "" {
+		return strings.TrimSpace(baseCommand)
+	}
+	if task.Status == state.StatusStarting || task.Status == state.StatusError {
+		return ClaudeNewCommand(baseCommand, task.ResumeID)
+	}
+	return ClaudeResumeCommand(baseCommand, task.ResumeID)
+}
+
+func (claudeDefinition) ScreenStatus(screenContent string) string {
+	return claudeScreenStatus(screenContent)
+}
+
+func (claudeDefinition) ApplyPTYTitle(task state.Task, terminalTitle string, screenStatus string) state.Task {
+	if terminalTitle != "" {
+		task.LiveTitle = titles.NormalizeLiveTitle(terminalTitle)
+	}
+	switch screenStatus {
+	case "Ready":
+		task.LiveStatus = screenStatus
+		task.Status = state.StatusReady
+	case "Working":
+		task.LiveStatus = screenStatus
+		task.Status = state.StatusRunning
+	}
+	return task
+}
+
+func (claudeDefinition) Loading(task state.Task, ctx LoadingContext) bool {
+	switch titles.ConsolidatedStatus(task) {
+	case string(state.StatusError), string(state.StatusStopped), string(state.StatusKilled), string(state.StatusSitting):
+		return false
+	}
+	if !ctx.Active {
+		return StatusShowsLoadingIndicator(task)
+	}
+	if StatusShowsLoadingIndicator(task) {
+		return true
+	}
+	return !ctx.ScreenVisible
+}
+
+func (claudeDefinition) TracksSessions() bool {
+	return true
+}
+
+func (claudeDefinition) TracksTerminalCWD() bool {
+	return false
+}
+
+func (claudeDefinition) TracksForegroundCommands() bool {
+	return false
+}
+
+func (claudeDefinition) ShowsExitFooter() bool {
+	return false
+}
+
+func (claudeDefinition) TopAlignedResize() bool {
+	return false
+}
+
+func (claudeDefinition) RestartableTerminal() bool {
+	return false
+}
+
 type terminalDefinition struct{}
 
 func (terminalDefinition) Kind() string {
@@ -182,6 +285,10 @@ func (terminalDefinition) InputMode() InputMode {
 
 func (terminalDefinition) StartPolicy() StartPolicy {
 	return StartPolicy{Status: state.StatusReady, Visible: true}
+}
+
+func (terminalDefinition) InitializeTask(task state.Task) state.Task {
+	return task
 }
 
 func (terminalDefinition) Command(baseCommand string, _ state.Task) string {
@@ -232,8 +339,84 @@ func CodexResumeCommand(codexCommand string, sessionID string) string {
 	return codexCommand + " resume " + shellQuote(sessionID)
 }
 
+func ClaudeNewCommand(claudeCommand string, sessionID string) string {
+	claudeCommand = strings.TrimSpace(claudeCommand)
+	if claudeCommand == "" {
+		claudeCommand = DefaultClaudeID
+	}
+	return claudeCommand + " --session-id " + shellQuote(sessionID)
+}
+
+func ClaudeResumeCommand(claudeCommand string, sessionID string) string {
+	claudeCommand = strings.TrimSpace(claudeCommand)
+	if claudeCommand == "" {
+		claudeCommand = DefaultClaudeID
+	}
+	return claudeCommand + " --resume " + shellQuote(sessionID)
+}
+
+func newClaudeSessionID(task state.Task) string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		sum := sha256.Sum256([]byte(strings.Join([]string{
+			task.ID,
+			task.WorkspaceID,
+			task.GroupID,
+			task.CreatedAt,
+		}, "\x00")))
+		copy(raw[:], sum[:16])
+	}
+	raw[6] = raw[6]&0x0f | 0x40
+	raw[8] = raw[8]&0x3f | 0x80
+	return fmt.Sprintf(
+		"%08x-%04x-%04x-%04x-%012x",
+		raw[0:4],
+		raw[4:6],
+		raw[6:8],
+		raw[8:10],
+		raw[10:16],
+	)
+}
+
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func claudeScreenStatus(content string) string {
+	content = strings.ToLower(content)
+	contentKey := screenStatusKey(content)
+	for _, activeMarker := range []string{
+		"esctointerrupt",
+		"ctrl+ctointerrupt",
+		"pressesctointerrupt",
+	} {
+		if strings.Contains(contentKey, activeMarker) {
+			return "Working"
+		}
+	}
+	for _, promptMarker := range []string{
+		"?forshortcuts",
+		"doyouwanttoproceed?",
+		"wouldyouliketoproceed?",
+		"doyoutrustthefilesinthisfolder?",
+		"entertoconfirm",
+		"esctocancel",
+	} {
+		if strings.Contains(contentKey, promptMarker) {
+			return "Ready"
+		}
+	}
+	lines := strings.Split(content, "\n")
+	firstTailLine := max(0, len(lines)-6)
+	for _, line := range lines[firstTailLine:] {
+		if strings.HasPrefix(strings.TrimSpace(line), "❯") {
+			return "Ready"
+		}
+	}
+	if strings.TrimSpace(content) != "" {
+		return "Working"
+	}
+	return ""
 }
 
 func codexScreenStatus(content string) string {
@@ -261,6 +444,13 @@ func codexScreenStatus(content string) string {
 		return "Ready"
 	}
 	return ""
+}
+
+func max(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func screenStatusKey(content string) string {

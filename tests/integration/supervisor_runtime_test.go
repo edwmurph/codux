@@ -386,7 +386,7 @@ func TestDashboardUpgradeResumeRestartsAndResumesIdleTask(t *testing.T) {
 			strings.Contains(capture, "CLI        "+weftversion.Version) &&
 			strings.Contains(capture, "Supervisor 3.9.0") &&
 			strings.Contains(capture, "supervisor 3.9.0 → "+weftversion.Version) &&
-			strings.Contains(capture, "Press U to upgrade and resume 1 idle Codex task")
+			strings.Contains(capture, "Press U to upgrade and resume 1 idle agent task")
 	})
 	directRun(t, newEnv, "send-keys", "-t", pane, "u")
 	waitForOutput(t, clientOutput, func(capture string) bool {
@@ -396,7 +396,7 @@ func TestDashboardUpgradeResumeRestartsAndResumesIdleTask(t *testing.T) {
 			!strings.Contains(capture, "N cancel") &&
 			!strings.Contains(capture, "Esc cancel") &&
 			strings.Contains(capture, "saved session IDs") &&
-			strings.Contains(capture, "fresh Codex tasks without one") &&
+			strings.Contains(capture, "fresh agent tasks without one") &&
 			screenContainsWrappedText(capture, "Shell jobs, env mutations, shell variables, and unsubmitted input are not preserved.")
 	})
 	directRun(t, newEnv, "send-keys", "-t", pane, "Enter")
@@ -426,6 +426,131 @@ func TestDashboardUpgradeResumeRestartsAndResumesIdleTask(t *testing.T) {
 	status := runWeft(t, newEnv, bin, "status")
 	if !strings.Contains(status, "upgrade: current") {
 		t.Fatalf("status should be current after upgrade resume:\n%s", status)
+	}
+	assertBackupWithReason(t, runtimeDir, workspace, "pre-upgrade resume restart")
+}
+
+func TestDashboardCreatesAndResumesClaudeAgentTask(t *testing.T) {
+	if os.Getenv("WEFT_RUN_INTEGRATION") != "1" {
+		t.Skip("set WEFT_RUN_INTEGRATION=1 to run live supervisor integration tests")
+	}
+
+	bin := buildWeft(t)
+	tmp := t.TempDir()
+	fakeCodex := writeFakeCodex(t, tmp, "fake-codex.sh")
+	fakeClaude, claudeLog := writeResumeFakeClaude(t, tmp, "fake-claude.sh")
+	runtimeDir := filepath.Join(tmp, "weft-home")
+	workspace := filepath.Join(tmp, "workspace")
+	if err := os.Mkdir(runtimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configText := fmt.Sprintf(`
+[task_types.claude]
+command = %q
+
+[task_types.codex]
+command = %q
+`, fakeClaude, fakeCodex)
+	if err := os.WriteFile(filepath.Join(runtimeDir, "config.toml"), []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeEnv := []string{"FAKE_CLAUDE_LOG=" + claudeLog}
+	oldEnv := appendUniqueEnv(upgradeEnv(runtimeDir, workspace, bin, "3.9.0"), claudeEnv...)
+	newEnv := appendUniqueEnv(baseIntegrationEnv(runtimeDir, workspace, bin), claudeEnv...)
+	registerSupervisorCleanup(t, newEnv, bin, "", runtimeDir)
+
+	runWeft(t, oldEnv, bin, "--no-attach")
+	oldPID := readPID(t, runtimeDir)
+	runWeft(t, oldEnv, bin, "workspace", "add", workspace)
+
+	pane := "claude-agent"
+	clientOutput, _ := startDirectDashboardClient(t, oldEnv, bin, workspace, pane, 150, 36)
+	waitForOutput(t, clientOutput, func(capture string) bool {
+		return strings.Contains(capture, "Workspaces") && strings.Contains(capture, "Tasks")
+	})
+	directRun(t, oldEnv, "send-keys", "-t", pane, "n")
+	waitForOutput(t, clientOutput, func(capture string) bool {
+		return strings.Contains(capture, "New task") && strings.Contains(capture, "Codex")
+	})
+	directRun(t, oldEnv, "send-keys", "-t", pane, "Left")
+	waitForOutput(t, clientOutput, func(capture string) bool {
+		return strings.Contains(capture, "New task") && strings.Contains(capture, "Claude")
+	})
+	directRun(t, oldEnv, "send-keys", "-t", pane, "Enter")
+
+	st := waitState(t, oldEnv, bin, func(st state.State) bool {
+		return len(st.Tasks) == 1 &&
+			st.Tasks[0].TypeID == config.DefaultTaskTypeClaude &&
+			st.Tasks[0].ResumeID != ""
+	})
+	if !waitForBool(8*time.Second, func() bool {
+		st = readState(t, oldEnv, bin)
+		return st.Tasks[0].Status == state.StatusReady && st.Tasks[0].LiveStatus == "Ready"
+	}) {
+		data, _ := os.ReadFile(claudeLog)
+		t.Fatalf("Claude task did not become ready: %#v\nscreen:\n%s\nlog:\n%s", st.Tasks[0], clientOutput(), data)
+	}
+	taskID := st.Tasks[0].ID
+	sessionID := st.Tasks[0].ResumeID
+	if !waitForBool(4*time.Second, func() bool {
+		data, err := os.ReadFile(claudeLog)
+		return err == nil && strings.Contains(string(data), "start:"+sessionID+":claude:claude:"+taskID)
+	}) {
+		data, _ := os.ReadFile(claudeLog)
+		t.Fatalf("fake Claude did not receive its new session id and Weft task environment:\n%s", data)
+	}
+
+	directRun(t, oldEnv, "send-keys", "-l", "-t", pane, "hello from Weft")
+	directRun(t, oldEnv, "send-keys", "-t", pane, "Enter")
+	waitState(t, oldEnv, bin, func(st state.State) bool {
+		task := state.TaskByID(st, taskID)
+		return task != nil && task.InputSubmitted && task.Status == state.StatusReady && task.LiveStatus == "Ready"
+	})
+	if !waitForBool(4*time.Second, func() bool {
+		data, err := os.ReadFile(claudeLog)
+		return err == nil && strings.Contains(string(data), "input:hello from Weft")
+	}) {
+		data, _ := os.ReadFile(claudeLog)
+		t.Fatalf("fake Claude did not receive dashboard input:\n%s", data)
+	}
+
+	clientOutput, _ = startDirectDashboardClient(t, newEnv, bin, workspace, pane+"-upgrade", 150, 36)
+	waitForOutput(t, clientOutput, func(capture string) bool {
+		return strings.Contains(capture, "Task Console")
+	})
+	directRun(t, newEnv, "send-keys", "-t", pane+"-upgrade", "C-b")
+	waitForOutput(t, clientOutput, func(capture string) bool {
+		return strings.Contains(capture, "Press U to upgrade and resume 1 idle agent task")
+	})
+	directRun(t, newEnv, "send-keys", "-t", pane+"-upgrade", "u")
+	waitForOutput(t, clientOutput, func(capture string) bool {
+		return strings.Contains(capture, "Upgrade supervisor?") &&
+			screenContainsWrappedText(capture, "resumes agent tasks with saved session IDs")
+	})
+	directRun(t, newEnv, "send-keys", "-t", pane+"-upgrade", "Enter")
+	if !waitForBool(8*time.Second, func() bool {
+		data, err := os.ReadFile(filepath.Join(runtimeDir, "weftd.pid"))
+		return err == nil && strings.TrimSpace(string(data)) != oldPID
+	}) {
+		t.Fatalf("supervisor did not restart after Claude upgrade confirmation; pid still %q\nscreen:\n%s", oldPID, clientOutput())
+	}
+	st = waitState(t, newEnv, bin, func(st state.State) bool {
+		task := state.TaskByID(st, taskID)
+		return task != nil &&
+			task.TypeID == config.DefaultTaskTypeClaude &&
+			task.Status == state.StatusReady &&
+			task.ResumeID == sessionID
+	})
+	if !waitForBool(4*time.Second, func() bool {
+		data, err := os.ReadFile(claudeLog)
+		return err == nil && strings.Contains(string(data), "resume:"+sessionID)
+	}) {
+		data, _ := os.ReadFile(claudeLog)
+		t.Fatalf("fake Claude was not resumed with session %q:\n%s", sessionID, data)
 	}
 	assertBackupWithReason(t, runtimeDir, workspace, "pre-upgrade resume restart")
 }
@@ -469,12 +594,12 @@ func TestDashboardUpgradeRestartStartsFreshCodexWithoutSession(t *testing.T) {
 	directRun(t, newEnv, "send-keys", "-t", pane, "C-b")
 	waitForOutput(t, clientOutput, func(capture string) bool {
 		return strings.Contains(capture, "Workspaces") &&
-			strings.Contains(capture, "Press U to upgrade and start 1 fresh Codex task")
+			strings.Contains(capture, "Press U to upgrade and start 1 fresh agent task")
 	})
 	directRun(t, newEnv, "send-keys", "-t", pane, "u")
 	waitForOutput(t, clientOutput, func(capture string) bool {
 		return strings.Contains(capture, "Upgrade supervisor?") &&
-			strings.Contains(capture, "fresh Codex tasks without one")
+			strings.Contains(capture, "fresh agent tasks without one")
 	})
 	directRun(t, newEnv, "send-keys", "-t", pane, "Enter")
 	if !waitForBool(8*time.Second, func() bool {
@@ -545,7 +670,7 @@ func TestDashboardConfigDriftRestartAppliesChangedConfig(t *testing.T) {
 	}
 	waitForOutput(t, clientOutput, func(capture string) bool {
 		return strings.Contains(capture, "Config ready: config.toml changed") &&
-			strings.Contains(capture, "Press U to apply config and start 1 fresh Codex task")
+			strings.Contains(capture, "Press U to apply config and start 1 fresh agent task")
 	})
 	directRun(t, env, "send-keys", "-t", pane, "u")
 	waitForOutput(t, clientOutput, func(capture string) bool {
@@ -971,6 +1096,38 @@ func writeFreshFakeCodex(t *testing.T, dir string, name string) (string, string)
 	return fakeCodex, codexLog
 }
 
+func writeResumeFakeClaude(t *testing.T, dir string, name string) (string, string) {
+	t.Helper()
+	claudeLog := filepath.Join(dir, "fake-claude.log")
+	fakeClaude := filepath.Join(dir, name)
+	writeExecutable(t, fakeClaude,
+		"#!/bin/sh\n"+
+			"case \"$1\" in\n"+
+			"  --session-id)\n"+
+			"    sid=$2\n"+
+			"    printf 'start:%s:%s:%s:%s\\n' \"$sid\" \"$WEFT_TASK_KIND\" \"$WEFT_TASK_TYPE_ID\" \"$WEFT_TASK_ID\" >> \"$FAKE_CLAUDE_LOG\"\n"+
+			"    ;;\n"+
+			"  --resume)\n"+
+			"    sid=$2\n"+
+			"    printf 'resume:%s\\n' \"$sid\" >> \"$FAKE_CLAUDE_LOG\"\n"+
+			"    ;;\n"+
+			"  *)\n"+
+			"    printf 'unexpected:%s:%s\\n' \"$1\" \"$2\" >> \"$FAKE_CLAUDE_LOG\"\n"+
+			"    ;;\n"+
+			"esac\n"+
+			"trap 'exit 0' HUP INT TERM\n"+
+			"printf '\\033]2;Claude Code\\007'\n"+
+			"printf '\\033[2J\\033[HClaude Code\\r\\n\\r\\n❯ \\r\\n  ? for shortcuts\\r\\n'\n"+
+			"while IFS= read -r line; do\n"+
+			"  printf 'input:%s\\n' \"$line\" >> \"$FAKE_CLAUDE_LOG\"\n"+
+			"  printf '\\033[2J\\033[H✻ Working…\\r\\n  Esc to interrupt\\r\\n'\n"+
+			"  sleep 0.2\n"+
+			"  printf '\\033[2J\\033[Hdone:%s\\r\\n\\r\\n❯ \\r\\n  ? for shortcuts\\r\\n' \"$line\"\n"+
+			"done\n",
+	)
+	return fakeClaude, claudeLog
+}
+
 func writeUpgradeFakeShell(t *testing.T, dir string, name string) (string, string) {
 	t.Helper()
 	shellLog := filepath.Join(dir, "fake-shell.log")
@@ -1204,6 +1361,16 @@ func waitState(t *testing.T, env []string, bin string, accept func(state.State) 
 		return accept(last)
 	})
 	return last
+}
+
+func readState(t *testing.T, env []string, bin string) state.State {
+	t.Helper()
+	out := runWeft(t, env, bin, "status", "--json")
+	var st state.State
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		t.Fatalf("parse state: %v\n%s", err, out)
+	}
+	return st
 }
 
 func waitFor(t *testing.T, name string, timeout time.Duration, fn func() bool) {

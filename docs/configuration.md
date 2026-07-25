@@ -16,7 +16,7 @@ weft config init
 
 Task types define what `n` can create in the dashboard. A task type can be an agent or a configured shell command.
 
-The default config includes a Codex agent task and a Shell command task:
+The default config includes Codex and Claude agent tasks plus a Shell command task:
 
 ```toml
 default_task_type = "codex"
@@ -29,6 +29,13 @@ request_attention = "once"
 
 [task_context]
 enabled = true
+
+[task_types.claude]
+label = "Claude"
+kind = "claude"
+command = "claude"
+badge = "[claude]"
+title_template = "Claude {status}"
 
 [task_types.codex]
 label = "Codex"
@@ -45,7 +52,7 @@ badge = "[shell]"
 title_template = "Shell"
 ```
 
-`codex` is the only supported agent kind today. Additional agents can be added upon request.
+`codex` and `claude` are the supported agent kinds. Weft starts new Claude tasks with a preallocated session UUID and resumes them with `claude --resume <session-id>` during a safe dashboard upgrade. Additional agents require a checked-in integration.
 
 Configured command tasks use `kind = "terminal"`. You can add more configured commands, for example:
 
@@ -76,7 +83,7 @@ Run `weft doctor attention` from iTerm2 if the Dock bounces but no notification 
 
 ## Task Notes
 
-Codex tasks can persist notes for their own task. `weft task notes preview set` stores a compact one-line shortform note for `Task Live Preview`. `weft task notes set` stores a concise one-line medform note that appears in the focused Codex `Task Console` heading and acts as the preview fallback. `weft task notes detail set` stores longer multi-line longform notes that appear in Task Tools, opened with `C-]`.
+Agent tasks can persist notes for their own task. `weft task notes preview set` stores a compact one-line shortform note for `Task Live Preview`. `weft task notes set` stores a concise one-line medform note that appears in the focused `Task Console` heading and acts as the preview fallback. `weft task notes detail set` stores longer multi-line longform notes that appear in Task Tools, opened with `C-]`.
 
 Task context is enabled by default. Disable it with:
 
@@ -123,13 +130,13 @@ title_hook_timeout_seconds = 10
 
 When configured, Weft runs the hook from the task workspace and sends JSON on stdin. The payload includes the first message plus `title_columns` and `auto_title_columns` hints that account for the current Tasks pane width, task marker, widest configured task-type badge, and title-template fields such as `{status}`. The first non-empty stdout line becomes the generated title.
 
-Codex agent tasks use the first submitted chat message. Configured command tasks opt in by including `{auto}` in `title_template`, then use the first typed command.
+Agent tasks use the first submitted chat message. Configured command tasks opt in by including `{auto}` in `title_template`, then use the first typed command.
 
 The checked-in `hooks/auto-title-openai.sh` script is one example hook. It reads `OPENAI_API_KEY` from the environment or a local ignored `.env` file and calls the OpenAI Responses API. Its prompt tells the model to stay within `auto_title_columns` so generated titles fit task rows without ellipsis truncation. The script retries transient curl failures twice by default; set `OPENAI_TITLE_CURL_RETRIES` and `OPENAI_TITLE_CURL_RETRY_DELAY_SECONDS` to tune that behavior. You can replace it with any command that follows the same stdin/stdout contract.
 
 ## Task Environment
 
-PTY task commands run from the task workspace through the user's shell with `-lc`. They inherit the parent environment, with `WEFT_ROOT`, `WEFT_HOME`, `WEFT_WORKSPACE`, and `NO_COLOR` removed and `SHELL` normalized to the resolved shell. Codex agent tasks then receive task-scoped `WEFT_HOME`, `WEFT_TASK_ID`, `WEFT_TASK_TYPE_ID`, and `WEFT_TASK_KIND=codex` so commands inside the task can address their own Weft metadata. Configured shell tasks do not receive those task-scoped variables. This means task commands can use the same credentials and environment variables they would see from a normal terminal, unless your shell startup files change them.
+PTY task commands run from the task workspace through the user's shell with `-lc`. They inherit the parent environment, with `WEFT_ROOT`, `WEFT_HOME`, `WEFT_WORKSPACE`, and `NO_COLOR` removed and `SHELL` normalized to the resolved shell. Integrated agent tasks then receive task-scoped `WEFT_HOME`, `WEFT_TASK_ID`, `WEFT_TASK_TYPE_ID`, and `WEFT_TASK_KIND`, set to `codex` or `claude`, so commands inside the task can address their own Weft metadata. Configured shell tasks do not receive those task-scoped variables. This means task commands can use the same credentials and environment variables they would see from a normal terminal, unless your shell startup files change them.
 
 Title hooks also run from the task workspace and inherit the environment with `SHELL` normalized. The checked-in `hooks/auto-title-openai.sh` helper reads `OPENAI_API_KEY` from the environment or a local ignored `.env` file and calls the OpenAI API only when you configure it as `title_hook_command`.
 
@@ -154,4 +161,4 @@ Installed releases use:
 
 Development runs from a source checkout use the checkout-local `.weft-runtime/` directory unless `WEFT_HOME`, `WEFT_ROOT`, or `WEFT_ALLOW_MAIN_RUNTIME=1` says otherwise.
 
-`state.json` stores workspace, group, and task metadata, including task type ids, titles, statuses, generated title metadata, provider-neutral live title/status and resume metadata, selected/active ids, and terminal cwd metadata. `task-context.json` stores Codex task notes separately from state. Normal task terminal output is kept in supervisor memory for the live console and preview, not in `state.json`. Idle shell task upgrade restart can temporarily write visible scrollback and cwd metadata under `terminal-upgrade-snapshots/`; Weft removes those files after restoring them into the restarted task.
+`state.json` stores workspace, group, and task metadata, including task type ids, titles, statuses, generated title metadata, provider-neutral live title/status and resume metadata, selected/active ids, and terminal cwd metadata. `task-context.json` stores agent task notes separately from state. Normal task terminal output is kept in supervisor memory for the live console and preview, not in `state.json`. Idle shell task upgrade restart can temporarily write visible scrollback and cwd metadata under `terminal-upgrade-snapshots/`; Weft removes those files after restoring them into the restarted task.

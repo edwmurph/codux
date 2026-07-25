@@ -112,11 +112,28 @@ func BuildUpgradeReport(st state.State, cfg config.Config, terminalForegroundAct
 		if state.TaskTypeID(task) == tasktypes.DefaultCodexID {
 			continue
 		}
+		taskType, ok := cfg.TaskType(state.TaskTypeID(task))
+		definition, supported := tasktypes.ForKind(taskType.Kind)
+		if ok && supported && definition.TracksSessions() {
+			report.Total++
+			if TaskFreshForUpgrade(task) {
+				report.Fresh++
+				continue
+			}
+			if !TaskIdleForUpgrade(task) {
+				report.Busy = append(report.Busy, task)
+				continue
+			}
+			if strings.TrimSpace(task.ResumeID) == "" {
+				report.Missing = append(report.Missing, task)
+				continue
+			}
+			report.Ready++
+			continue
+		}
 		if !taskLiveForRestart(task) {
 			continue
 		}
-		taskType, ok := cfg.TaskType(state.TaskTypeID(task))
-		definition, supported := tasktypes.ForKind(taskType.Kind)
 		if !ok || !supported || !definition.RestartableTerminal() || !TerminalTaskIdleForUpgrade(task) || terminalTaskForegroundActive(task.ID, terminalForegroundActive) {
 			report.TerminalBusy = append(report.TerminalBusy, task)
 			continue

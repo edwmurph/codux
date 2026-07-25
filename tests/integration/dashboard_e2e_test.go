@@ -491,7 +491,7 @@ title_template = "Shell"
 	}
 	waitForOutput(t, clientOutput, func(capture string) bool {
 		return strings.Contains(capture, "Tasks") &&
-			strings.Contains(capture, "! [shell] Shell")
+			screenContainsWrappedText(capture, "! [shell] Shell")
 	})
 	directRun(t, env, "send-keys", "-t", pane, "Enter")
 	waitForOutput(t, clientOutput, func(capture string) bool {

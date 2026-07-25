@@ -42,7 +42,7 @@ func TestCLIHelpIncludesLogoAndClearLaunch(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
-		"Terminal dashboard for Codex and shell tasks.",
+		"Terminal dashboard for agents and shell commands.",
 		weftversion.Label(),
 		"weft [--clear] [--attach|--no-attach]",
 		"weft <command> [--clear]",
@@ -52,7 +52,7 @@ func TestCLIHelpIncludesLogoAndClearLaunch(t *testing.T) {
 		"weft workspace add <path>    Add a workspace to the dashboard.",
 		"weft new [--type id] [title] Create a task.",
 		"weft task notes preview set   Set a short note for Task Live Preview.",
-		"weft task notes set <text>    Set the current Codex task heading note.",
+		"weft task notes set <text>    Set the current agent task heading note.",
 		"weft task notes detail set     Set longer notes for Task Tools.",
 		"weft close --kill [--yes]    Stop the supervisor and all task PTYs.",
 		"weft backup create           Back up config, state, and logs.",

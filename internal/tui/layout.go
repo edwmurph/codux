@@ -1252,7 +1252,7 @@ func taskContextHeadingForFrame(cfg config.Config, st state.State, preview strin
 		return ""
 	}
 	task := state.ActiveTask(st)
-	if task == nil || !taskIsCodex(cfg, *task) {
+	if task == nil || !taskIsAgent(cfg, *task) {
 		return ""
 	}
 	if previewMode {

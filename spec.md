@@ -4,7 +4,7 @@ This is the living product and technical specification for Weft. Keep this file 
 
 ## Product Definition
 
-Weft is one global terminal dashboard for managing agents and configured shell commands across multiple workspaces. A task is a long-running PTY-backed process. Integrated agent support is checked into Weft; configured command task types are loaded from config. Today Weft ships one supported agent, `codex`, and one default configured command task type, `shell`.
+Weft is one global terminal dashboard for managing agents and configured shell commands across multiple workspaces. A task is a long-running PTY-backed process. Integrated agent support is checked into Weft; configured command task types are loaded from config. Today Weft ships two supported agents, `codex` and `claude`, and one default configured command task type, `shell`.
 
 Weft is no longer one instance per workspace. One local Weft supervisor owns the global navigation state, the task registry, and task PTYs. Terminal UI clients attach to that supervisor, render the dashboard, and can detach without stopping tasks. Users can organize tasks by workspace, optionally place tasks into flat groups, then enter a selected task console when they want to interact with it.
 
@@ -25,7 +25,7 @@ The core workflow is:
 - Group names are flat strings.
 - Groups are optional; tasks can live directly in a workspace without a group.
 - Task rows render configured text only; no fixed status pills beside each row.
-- Integrated agent support is checked into Weft. Config can define generic command task types, but config alone cannot create a new tailored agent integration such as Claude.
+- Integrated agent support is checked into Weft. Config can define generic command task types, but config alone cannot create a new tailored agent integration.
 - The terminal UI should stay dense, minimal, and close to the current iTerm-style Weft look.
 - Supervisor-owned sessions: task PTYs must outlive any single TUI client.
 - Disposable clients: closing, upgrading, or restarting a TUI client must not clear state or stop tasks.
@@ -35,15 +35,17 @@ The core workflow is:
 
 ## Current And Legacy Boundary
 
-Current Weft behavior is the workspace, group, and typed task model backed by one local supervisor. Persisted state is the strict v6 task schema, with `tasks`, `active_task_id`, `selected_task_id`, provider-neutral live title/status and resume metadata, task `terminal_cwd`, and focus values of `workspaces`, `tasks`, or `console`. The supervisor owns all task PTYs, saves current state, captures resume IDs for Codex agent tasks, tracks OSC 7 cwd updates for terminal tasks, detects when on-disk config has drifted from the supervisor's active config, and performs the dashboard `U` upgrade/resume flow through the supervisor-owned `upgrade_resume` IPC command. Runtime behavior for each task type kind is owned by the checked-in task type definition registry, so startup state, input routing, command construction, screen-derived status, loading, terminal cwd tracking, foreground-command tracking, and restart behavior live with the task kind instead of scattered UI conditionals. Resuming Codex agent tasks with `codex resume <session-id>` after an explicit dashboard upgrade or config reload restart is part of the current product contract, not legacy compatibility. Configured command tasks are not resumable by the Codex resume integration; idle terminal tasks can only be restarted as fresh commands with saved history/cwd.
+Current Weft behavior is the workspace, group, and typed task model backed by one local supervisor. Persisted state is the strict v6 task schema, with `tasks`, `active_task_id`, `selected_task_id`, provider-neutral live title/status and resume metadata, task `terminal_cwd`, and focus values of `workspaces`, `tasks`, or `console`. The supervisor owns all task PTYs, saves current state, captures resume IDs for Codex agent tasks, assigns resume IDs before launching Claude agent tasks, tracks OSC 7 cwd updates for terminal tasks, detects when on-disk config has drifted from the supervisor's active config, and performs the dashboard `U` upgrade/resume flow through the supervisor-owned `upgrade_resume` IPC command. Runtime behavior for each task type kind is owned by the checked-in task type definition registry, so startup state, input routing, command construction, screen-derived status, loading, terminal cwd tracking, foreground-command tracking, and restart behavior live with the task kind instead of scattered UI conditionals. Resuming Codex with `codex resume <session-id>` and Claude with `claude --resume <session-id>` after an explicit dashboard upgrade or config reload restart is part of the current product contract, not legacy compatibility. Configured command tasks are not resumable by an agent resume integration; idle terminal tasks can only be restarted as fresh commands with saved history/cwd.
 
 Legacy behavior is unsupported unless this specification explicitly brings it back. Legacy includes tmux pane state, tab/column state, workdir/folder naming, hidden old commands, old config keys, state/config migration paths, and alias support for retired command or state shapes. Legacy files should be rejected with reset guidance rather than migrated, defaulted, repaired, or silently ignored by hidden compatibility code.
 
 ## Supported Agents
 
-Weft supports Codex today.
+Weft supports Codex and Claude Code.
 
 Codex support is the checked-in `kind = "codex"` task type definition. It includes Codex-specific title/status capture, resume ID capture, interrupt routing, command construction for `codex resume <session-id>`, and dashboard upgrade/resume behavior.
+
+Claude support is the checked-in `kind = "claude"` task type definition. It preallocates a UUID, starts the initial interactive session with `claude --session-id <session-id>`, derives ready/working status from the Claude terminal UI, shares agent input and interrupt routing, resumes with `claude --resume <session-id>`, and participates in dashboard upgrade/resume behavior.
 
 Additional agents can be added upon request. New agent support requires a checked-in task type definition; config alone can define generic shell command tasks but cannot add agent-specific behavior.
 
@@ -141,7 +143,7 @@ When `config.toml` changes after the supervisor has started, the supervisor keep
 
 When no tasks are running, Weft may restart the supervisor automatically to finish the upgrade after creating a runtime backup. When any task PTY is running, Weft must not restart the supervisor without explicit confirmation because that can stop live terminal work.
 
-The in-dashboard upgrade/config-reload action must be safe by default. While Codex agent tasks are busy, missing saved resume IDs after user input has been submitted, or any terminal task is running a foreground command, the dashboard shows pending copy, lists blocking tasks as YAML-style workspace/task entries using resolved task display titles rather than stored title templates, and offers `U` only to schedule auto-upgrade/config-reload when ready. A scheduled action is an intent held by the attached dashboard client so it can work with the older supervisor that is being upgraded; the dashboard must stay open, and pressing `U` again cancels the schedule. When the scheduled target becomes safe, the client sends the existing supervisor-owned `upgrade_resume` IPC command. A live Codex agent task that has not submitted input yet and has no resume ID is safe to recreate as a fresh agent task after restart. An idle/ready terminal task with no active foreground process is safe for explicit `U`; this is not shell resume. Once every remaining live task is either an idle resumable Codex agent task, a fresh unsubmitted Codex agent task, or an idle terminal task, `U` opens a confirmation where `Enter` proceeds and `Esc` cancels. The confirmed or scheduled action creates a pre-upgrade or pre-config-reload backup, preserves task rows, saves read-only terminal task history snapshots, closes idle task terminals, restarts the supervisor, resumes Codex agent tasks with `codex resume <session-id>`, starts fresh Codex agent tasks without a resume ID, and restarts idle shell task(s) with saved history/cwd. Terminal jobs, environment mutations, shell variables, and unsubmitted input are not preserved. The client must not run duplicate local restart/resume logic or synthesize upgrade/config state that was not sent by the supervisor. An already-open dashboard client reloads its local config only after the replacement supervisor reports the new active config fingerprint.
+The in-dashboard upgrade/config-reload action must be safe by default. While integrated agent tasks are busy, missing saved resume IDs after user input has been submitted, or any terminal task is running a foreground command, the dashboard shows pending copy, lists blocking tasks as YAML-style workspace/task entries using resolved task display titles rather than stored title templates, and offers `U` only to schedule auto-upgrade/config-reload when ready. A scheduled action is an intent held by the attached dashboard client so it can work with the older supervisor that is being upgraded; the dashboard must stay open, and pressing `U` again cancels the schedule. When the scheduled target becomes safe, the client sends the existing supervisor-owned `upgrade_resume` IPC command. A live Codex agent task that has not submitted input yet and has no resume ID is safe to recreate as a fresh agent task after restart; Claude tasks receive their resume ID before initial launch. An idle/ready terminal task with no active foreground process is safe for explicit `U`; this is not shell resume. Once every remaining live task is either an idle resumable agent task, a fresh unsubmitted Codex agent task, or an idle terminal task, `U` opens a confirmation where `Enter` proceeds and `Esc` cancels. The confirmed or scheduled action creates a pre-upgrade or pre-config-reload backup, preserves task rows, saves read-only terminal task history snapshots, closes idle task terminals, restarts the supervisor, resumes Codex agent tasks with `codex resume <session-id>`, resumes Claude agent tasks with `claude --resume <session-id>`, starts fresh Codex agent tasks without a resume ID, and restarts idle shell task(s) with saved history/cwd. Terminal jobs, environment mutations, shell variables, and unsubmitted input are not preserved. The client must not run duplicate local restart/resume logic or synthesize upgrade/config state that was not sent by the supervisor. An already-open dashboard client reloads its local config only after the replacement supervisor reports the new active config fingerprint.
 
 If the supervisor protocol is too old for the upgrade bridge, the client should explain the situation and offer the least destructive recovery path. A recommended explicit `weft close --kill` fallback must be reliable: after creating a backup, it should first try IPC shutdown with any advertised bridge protocol and then stop the recorded supervisor process if IPC shutdown is rejected by protocol mismatch.
 
@@ -162,7 +164,7 @@ Weft stores runtime files globally under `~/.weft` by default, under `$WEFT_ROOT
 
 `WEFT_ROOT` sets both development/worktree paths from one value: runtime files go in `$WEFT_ROOT/.weft`, and the launch workspace is `$WEFT_ROOT`. When source-built Weft runs from a Weft source checkout or detached worktree without `WEFT_ROOT` or `WEFT_HOME`, the current working directory is treated as that root and runtime files go under `.weft-runtime`. This keeps `go -C /path/to/weft-or-worktree run ./cmd/weft ...` isolated to `/path/to/weft-or-worktree/.weft-runtime` without requiring an environment override and without touching `.weft/config.toml` symlinks created for other workflows. `WEFT_WORKSPACE` overrides only the launch directory used for attach-time workspace context. `WEFT_HOME` overrides only the runtime directory. Development and worktree runs should usually rely on checkout-local auto-rooting. The installed release command owns the real default `~/.weft` runtime.
 
-Codex task PTYs receive `WEFT_HOME=<runtime dir>`, `WEFT_TASK_ID=<task id>`, `WEFT_TASK_TYPE_ID=<task type id>`, and `WEFT_TASK_KIND=codex` so commands running inside that task can address their own supervisor-owned metadata. Configured shell task PTYs do not receive these task-context environment variables.
+Integrated agent task PTYs receive `WEFT_HOME=<runtime dir>`, `WEFT_TASK_ID=<task id>`, `WEFT_TASK_TYPE_ID=<task type id>`, and `WEFT_TASK_KIND=<agent kind>` so commands running inside that task can address their own supervisor-owned metadata. `WEFT_TASK_KIND` is `codex` for Codex and `claude` for Claude. Configured shell task PTYs do not receive these task-context environment variables.
 
 Runtime backups live under `backups/<id>/` by default. A backup includes `metadata.json`, `config.toml` when present, `state.json` when present, `task-context.json` when present, and log files when present. Backups must not include sockets, locks, pid files, or live PTY/process state.
 
@@ -200,7 +202,7 @@ The default card title is the display path, for example `~/code/personal/weft`. 
 
 Selection is indicated by the card border, not a full-row background. Use a stronger blue border when the Workspaces pane has focus. Use a subtler blue border when the selected workspace is active but focus is in the Tasks pane.
 
-When a newly installed client is attached to an older compatible supervisor, or when `config.toml` has changed since the supervisor started, the bottom of the Workspaces pane shows a concise restart tip. While any Codex agent task is still active, the tip waits for idle/resumable Codex agent tasks, offers `Press U to schedule auto-upgrade when ready.`, and lists blockers as `Blocking:`, `- workspace: Core`, `  task: Release fix`. While any terminal task is running a foreground command, the tip waits for idle shell task(s) and uses the same blocker-list shape, for example `Blocking:`, `- workspace: API`, `  task: Server`. Config drift uses config-specific copy, for example `Config pending: config.toml changed`, `Wait for 1 shell task(s) to become idle`, `Press U to schedule auto-upgrade when ready.`, `Blocking:`, `- workspace: API`, `  task: Server`. Once scheduled, the pending tip says `Auto-upgrade scheduled in this dashboard. Press U to cancel.` When all remaining Codex agent tasks are idle and have saved resume IDs, or are fresh Codex agent tasks with no submitted input, and all remaining terminal task(s) are idle, the tip shows the immediate action, for example `Upgrade ready: supervisor 7.4.0 → 7.5.5. Press U to upgrade and resume 2 idle Codex task(s) and restart 1 idle shell task(s) with saved history/cwd.` Config drift ready copy says `Config ready: config.toml changed. Press U to apply config and ...`. For fresh unsubmitted Codex agent tasks without a resume ID, the ready copy says Weft will start fresh Codex agent task(s) after restart instead of resuming them. The tip must not imply that reopening the dashboard is enough to finish the upgrade or config reload, and it must not suggest destructive reset commands while live tasks can be resumed. The Tasks pane should not duplicate this pending/ready copy during an upgrade or config reload. The ready confirmation modal explains that Weft closes idle Codex terminals, restarts the supervisor, runs `codex resume <session-id>` for each saved Codex agent task, starts fresh Codex agent tasks that do not have a resume ID, and restarts idle shell task(s) with saved history/cwd. The schedule confirmation modal explains that the attached dashboard will keep checking blockers, must remain open, and will run the same safe upgrade automatically once every Codex task is idle/resumable and every shell task is idle. Both confirmations warn that terminal jobs, environment mutations, shell variables, and unsubmitted input are not preserved.
+When a newly installed client is attached to an older compatible supervisor, or when `config.toml` has changed since the supervisor started, the bottom of the Workspaces pane shows a concise restart tip. While any integrated agent task is still active, the tip waits for idle/resumable agent tasks, offers `Press U to schedule auto-upgrade when ready.`, and lists blockers as `Blocking:`, `- workspace: Core`, `  task: Release fix`. While any terminal task is running a foreground command, the tip waits for idle shell task(s) and uses the same blocker-list shape, for example `Blocking:`, `- workspace: API`, `  task: Server`. Config drift uses config-specific copy, for example `Config pending: config.toml changed`, `Wait for 1 shell task(s) to become idle`, `Press U to schedule auto-upgrade when ready.`, `Blocking:`, `- workspace: API`, `  task: Server`. Once scheduled, the pending tip says `Auto-upgrade scheduled in this dashboard. Press U to cancel.` When all remaining agent tasks are idle and have saved resume IDs, or are fresh Codex tasks with no submitted input, and all remaining terminal task(s) are idle, the tip shows the immediate action, for example `Upgrade ready: supervisor 7.4.0 → 7.5.5. Press U to upgrade and resume 2 idle agent task(s) and restart 1 idle shell task(s) with saved history/cwd.` Config drift ready copy says `Config ready: config.toml changed. Press U to apply config and ...`. For fresh unsubmitted Codex agent tasks without a resume ID, the ready copy says Weft will start fresh agent task(s) after restart instead of resuming them. The tip must not imply that reopening the dashboard is enough to finish the upgrade or config reload, and it must not suggest destructive reset commands while live tasks can be resumed. The Tasks pane should not duplicate this pending/ready copy during an upgrade or config reload. The ready confirmation modal explains that Weft closes idle agent terminals, restarts the supervisor, runs the provider-specific resume command for each saved agent session, starts fresh Codex tasks that do not have a resume ID, and restarts idle shell task(s) with saved history/cwd. The schedule confirmation modal explains that the attached dashboard will keep checking blockers, must remain open, and will run the same safe upgrade automatically once every agent task is idle/resumable and every shell task is idle. Both confirmations warn that terminal jobs, environment mutations, shell variables, and unsubmitted input are not preserved.
 
 When there is enough vertical space, the top of the Workspaces pane shows compact runtime branding and version details inside a small centered box with sharp corners and compact padding. The box uses a small emphasized `Weft` mark followed by the current CLI version and running supervisor version, with the version values aligned in one column. This header stays visible while an upgrade tip is active. The upgrade tip remains pinned to the bottom of the Workspaces pane, and the workspace-card body between the header and footer scrolls with the selected workspace as keyboard arrows move through the list. Workspace cards render one blank line below the version box when vertical space allows it. This header is secondary chrome: it must not permanently hide workspace cards.
 
@@ -283,13 +285,13 @@ The pane shows either:
 - a centered empty message when no task is open, with a subtle Weft wordmark when space allows. Dashboard version information belongs in the Workspaces pane header, not in the task pane empty state.
 - the selected task terminal when a task is open
 
-When navigation is open, the Workspaces and Tasks panes push `Task Live Preview` to the right. The preview shows live task output only when the current navigation focus is on a task row. Focusing a real workspace card, the new-workspace template card, a group row, or any other non-task navigation target renders `No task selected` instead of the last viewed task. If the focused task row and the captured task output owner disagree after a move, refresh, or supervisor restart, the preview renders `No task selected` until the next synced snapshot instead of showing another task's output. When a workspace already has tasks but the current target is not a task row, the `No task selected` hint tells the user to select a task to preview rather than suggesting task creation. The `No task selected` state uses the shared Weft wordmark with balanced diamond input nodes, a centered solid output arrowhead, visible spacing before the block text, and a subtle faster left-to-right pulse in fixed-width chunks limited to the arrow graph, followed by a roughly three-second pause before the next pulse. That animation is presentation only and must not imply task activity. When a task row is focused, the preview title appends one space and a slowly pulsing dot to indicate the preview can update with live task output. The preview title animation is also presentation only and does not mean the selected task is busy; it is omitted when there is no selected task to preview. If task notes are enabled and the selected task is a Codex task, the preview top border shows a subtle `note` badge with the preview shortform note when present, otherwise the console heading note as a fallback. The preview is read-only: keyboard input controls Weft navigation and organization, not the task PTY. In dashboard mode, mouse clicks, hover, and movement do not change dashboard focus, selection, preview scrollback, or task PTYs. Wheel or trackpad input inside a task-bound `Task Live Preview` pane scrolls Weft's captured preview scrollback without changing dashboard focus or forwarding input to the task PTY; wheel or trackpad input outside a task-bound preview remains ignored. Left-button drag selection inside the preview uses the same selected-cell highlight, clipboard copy behavior, and brief copy-confirmation toast as `Task Console` without changing navigation focus. When a task row is focused, the preview top border shows the selected task title at the top right, except while the copy-confirmation toast is visible. `Task Live Preview` and focused `Task Console` content reserve one inner column on both the left and right. Preview clipping never inserts non-task ellipsis glyphs into terminal output, and when a wider terminal row has a right-aligned prompt segment separated by blank cells, the preview preserves that right prompt tail instead of spending visible columns on the hidden blank gap.
+When navigation is open, the Workspaces and Tasks panes push `Task Live Preview` to the right. The preview shows live task output only when the current navigation focus is on a task row. Focusing a real workspace card, the new-workspace template card, a group row, or any other non-task navigation target renders `No task selected` instead of the last viewed task. If the focused task row and the captured task output owner disagree after a move, refresh, or supervisor restart, the preview renders `No task selected` until the next synced snapshot instead of showing another task's output. When a workspace already has tasks but the current target is not a task row, the `No task selected` hint tells the user to select a task to preview rather than suggesting task creation. The `No task selected` state uses the shared Weft wordmark with balanced diamond input nodes, a centered solid output arrowhead, visible spacing before the block text, and a subtle faster left-to-right pulse in fixed-width chunks limited to the arrow graph, followed by a roughly three-second pause before the next pulse. That animation is presentation only and must not imply task activity. When a task row is focused, the preview title appends one space and a slowly pulsing dot to indicate the preview can update with live task output. The preview title animation is also presentation only and does not mean the selected task is busy; it is omitted when there is no selected task to preview. If task notes are enabled and the selected task is an integrated agent task, the preview top border shows a subtle `note` badge with the preview shortform note when present, otherwise the console heading note as a fallback. The preview is read-only: keyboard input controls Weft navigation and organization, not the task PTY. In dashboard mode, mouse clicks, hover, and movement do not change dashboard focus, selection, preview scrollback, or task PTYs. Wheel or trackpad input inside a task-bound `Task Live Preview` pane scrolls Weft's captured preview scrollback without changing dashboard focus or forwarding input to the task PTY; wheel or trackpad input outside a task-bound preview remains ignored. Left-button drag selection inside the preview uses the same selected-cell highlight, clipboard copy behavior, and brief copy-confirmation toast as `Task Console` without changing navigation focus. When a task row is focused, the preview top border shows the selected task title at the top right, except while the copy-confirmation toast is visible. `Task Live Preview` and focused `Task Console` content reserve one inner column on both the left and right. Preview clipping never inserts non-task ellipsis glyphs into terminal output, and when a wider terminal row has a right-aligned prompt segment separated by blank cells, the preview preserves that right prompt tail instead of spending visible columns on the hidden blank gap.
 
 When the user presses `Enter` on a task, navigation slides away left, `Task Console` expands to the full terminal, and focus moves to the task console.
 
 Task PTYs can only receive input when `Task Console` is focused and maximized.
 
-When `Task Console` is focused, the top border shows the configured drawer key as `<key> dashboard` and the configured Task Tools key as `<key> tools` without a `WEFT` prefix, and the top-right border shows only the active task title. If task notes are enabled and the active task is a Codex task with a stored heading note, the focused console shows a subtle `note` badge and the clipped one-line heading beside the left toolbar. Multi-line notes never render as always-visible task output; they are shown when Task Tools is opened with the configured tools key. Task notes do not render in configured shell task consoles. If at least one other global unsilenced task has rendered/live status `ready`, the bottom-right border shows an amber `<n> other task(s) ready` indicator. The active console task and silenced tasks are excluded from that count, and the indicator is hidden when no other unsilenced tasks are ready. Other short console notices, including copy-confirmation toasts, also render in the bottom-right border so the task title remains the only top-right console item. The active `Task Console` pane border remains the active Weft blue on every border segment and corner even when bottom-right notices use their own text styling.
+When `Task Console` is focused, the top border shows the configured drawer key as `<key> dashboard` and the configured Task Tools key as `<key> tools` without a `WEFT` prefix, and the top-right border shows only the active task title. If task notes are enabled and the active task is an integrated agent task with a stored heading note, the focused console shows a subtle `note` badge and the clipped one-line heading beside the left toolbar. Multi-line notes never render as always-visible task output; they are shown when Task Tools is opened with the configured tools key. Task notes do not render in configured shell task consoles. If at least one other global unsilenced task has rendered/live status `ready`, the bottom-right border shows an amber `<n> other task(s) ready` indicator. The active console task and silenced tasks are excluded from that count, and the indicator is hidden when no other unsilenced tasks are ready. Other short console notices, including copy-confirmation toasts, also render in the bottom-right border so the task title remains the only top-right console item. The active `Task Console` pane border remains the active Weft blue on every border segment and corner even when bottom-right notices use their own text styling.
 
 ## Navigation States
 
@@ -341,10 +343,10 @@ Autocomplete menus open directly under the input whenever the current value has 
 - `Task Console` fills the terminal.
 - Weft keeps the framed `Task Console` pane visible while a task is focused.
 - The attached client forwards raw terminal input bytes into the active task PTY without key-name reconstruction. The configured drawer key, `C-b` by default, and the configured Task Tools key, `C-]` by default, are owned by Weft.
-- Terminal-generated C-c belongs to the task whenever `Task Console` is focused and an active task exists. For configured terminal tasks with an active foreground command, Weft forwards C-c as the normal terminal interrupt byte. For configured terminal tasks at an idle prompt, Weft kills the task PTY, returns to the dashboard `Tasks` pane, and reports the task as killed. For Codex agent tasks, while Codex reports active work, Weft delivers C-c through Codex's interrupt path so running side-thread work is interrupted without returning from or closing the side thread. Weft does not use C-c to quit from `Task Console`, and the toolbar must not advertise C-c.
+- Terminal-generated C-c belongs to the task whenever `Task Console` is focused and an active task exists. For configured terminal tasks with an active foreground command, Weft forwards C-c as the normal terminal interrupt byte. For configured terminal tasks at an idle prompt, Weft kills the task PTY, returns to the dashboard `Tasks` pane, and reports the task as killed. For integrated agent tasks, while the agent reports active work, Weft delivers C-c through the agent interrupt path so running work is interrupted without returning from or closing the task. Weft does not use C-c to quit from `Task Console`, and the toolbar must not advertise C-c.
 - Terminal-owned behavior, including Vim mode, Esc timing, bracketed paste, Alt/Meta prefixes, and modified-key shortcuts such as Shift+Enter and Shift+Tab in supporting terminals, is preserved inside the framed pane.
 - The framed terminal renderer preserves cursor visibility and cursor shape requests, including block, underline, and bar cursor modes used by Vim insert/normal state.
-- Weft enables cell-level mouse tracking in the attached client. In focused `Task Console`, trackpad or wheel scrolling anywhere in the console frame moves through Weft's captured scrollback for normal shell output. When a focused configured terminal task is in terminal full-screen or pager mode, indicated by alternate-screen terminal state, trackpad or wheel input is forwarded to that task PTY so pager/full-screen programs can handle it interactively. `Task Live Preview` remains read-only: wheel or trackpad input scrolls Weft's captured preview scrollback only when the visible preview is bound to the selected task, and is never forwarded to the task PTY. Terminal task preview renders as a cropped lens and must not resize the task PTY or destructively narrow saved terminal rows when the dashboard drawer opens or reattaches after an upgrade, but the focused active `Task Console` must resize its cached terminal screen to the current visible content width so prompt layout stays responsive at narrow terminal widths. During terminal-row width changes, right-aligned prompt tails separated by blank cells stay anchored to the current row's right edge while the middle blank gap shrinks or grows. Codex task drag selection starts after the shared visual indentation margin, while configured terminal task drag selection starts at terminal column zero so the highlighted cells and copied clipboard text can include the full row without post-copy text rewriting. While the drag highlight is active, highlighted cells use one consistent foreground color and one consistent background color, regardless of the task's existing cell colors. The console border shows a short copy-confirmation toast. Mouse input outside the focused console is ignored except for Task Live Preview wheel scrolling and drag-copy, and it is not forwarded to Codex.
+- Weft enables cell-level mouse tracking in the attached client. In focused `Task Console`, trackpad or wheel scrolling anywhere in the console frame moves through Weft's captured scrollback for normal shell output. When a focused configured terminal task is in terminal full-screen or pager mode, indicated by alternate-screen terminal state, trackpad or wheel input is forwarded to that task PTY so pager/full-screen programs can handle it interactively. `Task Live Preview` remains read-only: wheel or trackpad input scrolls Weft's captured preview scrollback only when the visible preview is bound to the selected task, and is never forwarded to the task PTY. Terminal task preview renders as a cropped lens and must not resize the task PTY or destructively narrow saved terminal rows when the dashboard drawer opens or reattaches after an upgrade, but the focused active `Task Console` must resize its cached terminal screen to the current visible content width so prompt layout stays responsive at narrow terminal widths. During terminal-row width changes, right-aligned prompt tails separated by blank cells stay anchored to the current row's right edge while the middle blank gap shrinks or grows. Integrated agent task drag selection starts after the shared visual indentation margin, while configured terminal task drag selection starts at terminal column zero so the highlighted cells and copied clipboard text can include the full row without post-copy text rewriting. While the drag highlight is active, highlighted cells use one consistent foreground color and one consistent background color, regardless of the task's existing cell colors. The console border shows a short copy-confirmation toast. Mouse input outside the focused console is ignored except for Task Live Preview wheel scrolling and drag-copy, and it is not forwarded to an agent task.
 - If the active task PTY exits while `Task Console` is focused, Weft returns to the dashboard `Tasks` pane, keeps the task selected, and makes the exited state visible in task metadata. Normal exits are reported as stopped; exits immediately after a forwarded C-c are reported as killed.
 - User exits back to dashboard with the configured drawer/navigation key.
 
@@ -394,7 +396,7 @@ killed
 error
 ```
 
-The exact derivation of `ready`, `waiting`, `running`, and other live states is owned by each task type definition and can evolve independently of the UI layout. For Codex tasks, the Codex definition parses live terminal-title status into provider-neutral `live_status`, preserving status-word casing including newer labels such as `Exploring` or `Crafting`; fallback lifecycle statuses remain the lowercase model values above. When the Codex screen is stopped on a user prompt, such as Plan mode waiting for a user answer, a tool permission allow/deny choice, or a command approval prompt, Weft derives `Ready` for `{status}` even if the terminal title has not changed from a running-like title.
+The exact derivation of `ready`, `waiting`, `running`, and other live states is owned by each task type definition and can evolve independently of the UI layout. For Codex tasks, the Codex definition parses live terminal-title status into provider-neutral `live_status`, preserving status-word casing including newer labels such as `Exploring` or `Crafting`; fallback lifecycle statuses remain the lowercase model values above. When the Codex screen is stopped on a user prompt, such as Plan mode waiting for a user answer, a tool permission allow/deny choice, or a command approval prompt, Weft derives `Ready` for `{status}` even if the terminal title has not changed from a running-like title. For Claude tasks, the Claude definition derives `Ready` from the interactive input footer and selection/permission prompts, derives `Working` from activity/interrupt affordances or other non-empty active screens, and stores those values in the same provider-neutral fields.
 
 Runtime behavior must resolve provider-specific or command-specific live words into consolidated buckets before making task-pane decisions. Active buckets are `starting`, `running`, `waiting`, `working`, and `shipping`; ready and terminal buckets are `ready`, `sitting`, `stopped`, `killed`, and `error`. Unknown live work words such as `Crafting` or a configured terminal command's custom active label are treated as `working` for row styling, active counts, interrupt routing, and task-pane duration timing. The task-pane duration prefix is derived from transitions into and out of those consolidated active buckets, not from provider-specific display text. While a task is active, the duration prefix ticks from the active operation start. When that operation completes and the task returns to `ready`, the Tasks pane keeps the last completed operation duration visible as a static prefix until the next active operation or a non-ready terminal state clears it.
 
@@ -402,19 +404,26 @@ Runtime behavior must resolve provider-specific or command-specific live words i
 
 Task types are loaded from config. Each task type represents either an agent or a configured shell command. Each task type has:
 
-- `id`: map key, such as `codex`, `shell`, or `logs`
+- `id`: map key, such as `codex`, `claude`, `shell`, or `logs`
 - `label`: human-readable display label
 - `kind`: either a checked-in agent kind or `terminal`
 - `command`: shell command used to start the PTY
 - `badge`: bracketed type badge rendered before the task title; when omitted, it defaults to `[<id>]`
 - `title_template`: default title copied into newly created tasks of this type
 
-Each `kind` resolves to a checked-in task type definition. Definitions own the task-kind capabilities that affect runtime behavior: input mode, startup status, command construction, screen-derived status, loading rules, terminal cwd tracking, foreground-command tracking, exit footer behavior, screen resize behavior, and restartability during dashboard `U`. Checked-in agent kinds can add tailored behavior. `codex` is currently the only supported agent kind. Additional agents can be added upon request. Generic configured command task types must use `kind = "terminal"` and do not get agent-specific live title/status capture, resume ID capture, interrupt routing, or true resume. Unsupported agent kinds, including `kind = "claude"` before Claude support is checked in, must be rejected at config load with guidance to use `terminal` for generic commands. Any idle/ready `kind = "terminal"` task with no active foreground process can be restarted after dashboard `U` with read-only pre-upgrade history and the latest cwd captured from OSC 7.
+Each `kind` resolves to a checked-in task type definition. Definitions own the task-kind capabilities that affect runtime behavior: input mode, startup status, task initialization, command construction, screen-derived status, loading rules, terminal cwd tracking, foreground-command tracking, exit footer behavior, screen resize behavior, and restartability during dashboard `U`. Checked-in agent kinds can add tailored behavior. `codex` and `claude` are the supported agent kinds. Additional agents can be added upon request. Generic configured command task types must use `kind = "terminal"` and do not get agent-specific live title/status capture, resume ID capture, interrupt routing, or true resume. Unsupported agent kinds must be rejected at config load with guidance to use `terminal` for generic commands. Any idle/ready `kind = "terminal"` task with no active foreground process can be restarted after dashboard `U` with read-only pre-upgrade history and the latest cwd captured from OSC 7.
 
 Default task types:
 
 ```toml
 default_task_type = "codex"
+
+[task_types.claude]
+label = "Claude"
+kind = "claude"
+command = "claude"
+badge = "[claude]"
+title_template = "Claude {status}"
 
 [task_types.codex]
 label = "Codex"
@@ -438,9 +447,9 @@ Task context defaults to enabled:
 enabled = true
 ```
 
-Task notes have three independent fields. The preview field is a compact one-line shortform shown in `Task Live Preview`. The heading field is a concise one-line medform shown in the focused Codex `Task Console` heading and used as the preview fallback when no preview field is set. The detail field accepts longer multi-line longform text and appears in Task Tools. Task notes do not render in configured shell task consoles.
+Task notes have three independent fields. The preview field is a compact one-line shortform shown in `Task Live Preview`. The heading field is a concise one-line medform shown in the focused agent `Task Console` heading and used as the preview fallback when no preview field is set. The detail field accepts longer multi-line longform text and appears in Task Tools. Task notes do not render in configured shell task consoles.
 
-The dashboard new-task form has focused Type, `[ ] Silent`, and Title fields in that visual order. The form opens with Type focused so choosing between configured task types is the first interaction. `Up`/`Down` move between fields, `Tab` cycles fields, and `Enter` creates the task when the type dropdown is closed. Focused Type and Title inputs use the blue modal input border; focused Silent renders only the `[ ]` or `[x]` checkbox glyph in blue. The Type field renders the selected task type label only, such as `Codex` or `Shell`; `Left`/`Right` cycles task types, and `Space` opens a dropdown where `Up`/`Down` choose a task type and `Enter` or `Tab` closes the dropdown. `Space` toggles Silent when the checkbox is focused. The title input defaults to the selected task type's `title_template`, and supported title variables render under the title input. Changing the selected task type updates the title input to the newly selected type's default only while the input is blank or still matches the previous type default; once the user edits the title, type changes preserve that custom value. The edit-task form renders its Silent checkbox above the Title input, initializes it from the selected task, lists the same supported title variables under the Title input, and title-only command-line rename preserves the current silent value. The Tasks pane reserves a fixed badge column wide enough for the configured task type badges so task rows do not drift out of alignment.
+The dashboard new-task form has focused Type, `[ ] Silent`, and Title fields in that visual order. The form opens with Type focused so choosing between configured task types is the first interaction. `Up`/`Down` move between fields, `Tab` cycles fields, and `Enter` creates the task when the type dropdown is closed. Focused Type and Title inputs use the blue modal input border; focused Silent renders only the `[ ]` or `[x]` checkbox glyph in blue. The Type field renders the selected task type label only, such as `Codex`, `Claude`, or `Shell`; `Left`/`Right` cycles task types, and `Space` opens a dropdown where `Up`/`Down` choose a task type and `Enter` or `Tab` closes the dropdown. `Space` toggles Silent when the checkbox is focused. The title input defaults to the selected task type's `title_template`, and supported title variables render under the title input. Changing the selected task type updates the title input to the newly selected type's default only while the input is blank or still matches the previous type default; once the user edits the title, type changes preserve that custom value. The edit-task form renders its Silent checkbox above the Title input, initializes it from the selected task, lists the same supported title variables under the Title input, and title-only command-line rename preserves the current silent value. The Tasks pane reserves a fixed badge column wide enough for the configured task type badges so task rows do not drift out of alignment.
 
 The dashboard `n` shortcut opens the new-task form. `Enter` creates a top-level task of the selected type with the entered title. The CLI command `weft new` creates the configured `default_task_type`, and `weft new --type <id>` creates a specific task type. Tasks always start in the selected workspace and are created top-level with no group.
 
@@ -454,6 +463,12 @@ Default Codex agent task template:
 
 ```text
 {live}
+```
+
+Default Claude agent task template:
+
+```text
+Claude {status}
 ```
 
 Supported variables:
@@ -734,7 +749,7 @@ Rules:
 
 - Starting a task launches its configured command in its workspace.
 - Switching tasks changes which PTY is rendered in `Task Live Preview` or `Task Console`.
-- Task-focus input is forwarded to task PTYs as raw bytes, except for the configured drawer key that returns to the dashboard. For Codex agent tasks, terminal-generated C-c while Codex reports active work is routed through Codex's interrupt path.
+- Task-focus input is forwarded to task PTYs as raw bytes, except for the configured drawer key that returns to the dashboard. For integrated agent tasks, terminal-generated C-c while the agent reports active work is routed through the agent interrupt path.
 - Configured command task progress is derived from submitted input and the PTY foreground process group, without injecting shell prompt hooks.
 - Configured command task input must behave like the same shell outside Weft. Enhanced keyboard protocol sequences for ordinary typing and readline controls are decoded before forwarding, so keys such as `C-u` clear the current shell line instead of printing CSI-u bytes.
 - Modifier-only enhanced keyboard events, such as bare Shift or Ctrl press reports, are ignored and must never be forwarded as literal CSI-u text.
@@ -833,56 +848,56 @@ Global `--clear`:
 
 `weft task notes preview set [--task <id>] <text...>`:
 
-- persists a compact one-line preview note for a Codex task when `task_context.enabled = true`
+- persists a compact one-line preview note for an integrated agent task when `task_context.enabled = true`
 - reads piped stdin when no text arguments are provided
 - rejects empty terminal stdin, empty notes, multi-line preview notes, and preview notes larger than 160 bytes
 - defaults to `WEFT_TASK_ID` when present, otherwise to the supervisor's active task
-- rejects configured shell tasks because task notes are a Codex-task feature
+- rejects configured shell tasks because task notes are an integrated-agent feature
 
 `weft task notes preview show [--task <id>] [--json]`:
 
-- prints the preview note for the selected Codex task
+- prints the preview note for the selected agent task
 - prints the `task_context` response object as JSON when `--json` is provided
 
 `weft task notes preview clear [--task <id>]`:
 
-- removes the preview note for the selected Codex task
+- removes the preview note for the selected agent task
 - also runs when there are no stored preview notes so automation can be idempotent
 
 `weft task notes set [--task <id>] <text...>`:
 
-- persists a concise one-line heading note for a Codex task when `task_context.enabled = true`
+- persists a concise one-line heading note for an integrated agent task when `task_context.enabled = true`
 - reads piped stdin when no text arguments are provided
 - rejects empty terminal stdin, empty notes, multi-line heading notes, and heading notes larger than 512 bytes
 - defaults to `WEFT_TASK_ID` when present, otherwise to the supervisor's active task
-- rejects configured shell tasks because task notes are a Codex-task feature
+- rejects configured shell tasks because task notes are an integrated-agent feature
 
 `weft task notes show [--task <id>] [--json]`:
 
-- prints the heading note for the selected Codex task
+- prints the heading note for the selected agent task
 - prints the `task_context` response object as JSON when `--json` is provided
 
 `weft task notes clear [--task <id>]`:
 
-- removes the heading note for the selected Codex task
+- removes the heading note for the selected agent task
 - also runs when there are no stored notes so automation can be idempotent
 
 `weft task notes detail set [--task <id>] <text...>`:
 
-- persists longer notes for a Codex task when `task_context.enabled = true`
+- persists longer notes for an integrated agent task when `task_context.enabled = true`
 - reads piped stdin when no text arguments are provided
 - accepts newlines and rejects empty notes or content larger than 16 KiB
 - defaults to `WEFT_TASK_ID` when present, otherwise to the supervisor's active task
-- rejects configured shell tasks because task notes are a Codex-task feature
+- rejects configured shell tasks because task notes are an integrated-agent feature
 
 `weft task notes detail show [--task <id>] [--json]`:
 
-- prints the longer notes for the selected Codex task
+- prints the longer notes for the selected agent task
 - prints the `task_context` response object as JSON when `--json` is provided
 
 `weft task notes detail clear [--task <id>]`:
 
-- removes longer notes for the selected Codex task
+- removes longer notes for the selected agent task
 - also runs when there are no stored notes so automation can be idempotent
 
 `weft skill install [--force]`:
@@ -1030,7 +1045,7 @@ Integration tests:
 - start supervisor with `weft --no-attach`
 - attach, detach, and reattach while a task keeps running
 - add workspace, group, task
-- create Codex agent and configured shell command task types
+- create Codex, Claude, and configured shell command task types
 - open task with `Enter`
 - collapse or open a group with `Enter`
 - verify nav panes collapse and the active task receives input
@@ -1040,14 +1055,15 @@ Integration tests:
 - delete every group and task from a workspace and keep an empty Tasks pane
 - persist and reload selected workspace/group/task state
 - upgrade with no running tasks restarts the supervisor automatically
-- upgrade with running Codex agent tasks preserves the old supervisor until tasks are idle/resumable and the user confirms `U`
+- upgrade with running integrated agent tasks preserves the old supervisor until tasks are idle/resumable and the user confirms `U`
+- create a Claude task through the dashboard type picker, pass its preallocated UUID to `claude --session-id`, route task input, derive ready/working state, and resume the same UUID after a confirmed `U` restart
 - config drift with running tasks uses the same pending/ready `U` path, lists blocking tasks as workspace/task entries, and applies changed config only after the safe restart
 - source/dev binary without `WEFT_ROOT` or `WEFT_HOME` fails before creating default runtime files
 - automatic backups are created before `--clear`, `close --kill`, and idle upgrade auto-restart
 - backup restore confirms before stopping a running supervisor unless `--yes` is provided
 - source/dev runs from a Weft checkout derive their isolated runtime from the checkout cwd under `.weft-runtime`, so `go -C <checkout> run ./cmd/weft --clear` does not need `WEFT_ROOT` or `WEFT_HOME`
 
-Integration tests should use temporary `WEFT_ROOT`, or temporary `WEFT_HOME` and `WEFT_WORKSPACE` when distinct paths are required, plus a fake Codex agent task command. They should not require tmux.
+Integration tests should use temporary `WEFT_ROOT`, or temporary `WEFT_HOME` and `WEFT_WORKSPACE` when distinct paths are required, plus fake agent task commands. They should not require real Codex or Claude authentication or tmux.
 
 Verification workflow:
 

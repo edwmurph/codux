@@ -52,9 +52,10 @@ func TestTaskTypeBadgeCellUsesConfiguredColumnWidth(t *testing.T) {
 		taskType config.TaskType
 		want     string
 	}{
-		{taskType: cfg.TaskTypes["codex"], want: "[codex]"},
-		{taskType: cfg.TaskTypes["shell"], want: "[shell]"},
-		{taskType: cfg.TaskTypes["logs"], want: "[logs] "},
+		{taskType: cfg.TaskTypes["claude"], want: "[claude]"},
+		{taskType: cfg.TaskTypes["codex"], want: "[codex] "},
+		{taskType: cfg.TaskTypes["shell"], want: "[shell] "},
+		{taskType: cfg.TaskTypes["logs"], want: "[logs]  "},
 	}
 
 	for _, tt := range tests {
@@ -141,6 +142,9 @@ func TestNewTaskModalRendersAndTogglesSilentCheckbox(t *testing.T) {
 	raw = renderNewTaskModal(cfg, result.index, result.input, 60, result.field, result.silent, result.typeOpen)
 	if !strings.Contains(raw, "\x1b[38;5;117m╭") {
 		t.Fatalf("focused type field should use blue border:\n%s", raw)
+	}
+	if rendered := ansi.Strip(raw); !strings.Contains(rendered, "Claude") || !strings.Contains(rendered, "Codex") || !strings.Contains(rendered, "Shell") {
+		t.Fatalf("default task type choices should include both agents and shell:\n%s", rendered)
 	}
 	result = handleNewTaskKey(cfg, result.index, result.input, result.field, result.silent, result.typeOpen, tea.KeyMsg{Type: tea.KeyDown})
 	if result.index == index || result.field != 0 || !result.silent || !result.typeOpen {
@@ -949,7 +953,7 @@ func TestClientUpgradeBannerOpensUpgradeResumeConfirm(t *testing.T) {
 		"Supervisor 3.9.0",
 		"Upgrade ready: supervisor 3.9.0",
 		weftversion.Version,
-		"Press U to upgrade and resume 1 idle Codex task",
+		"Press U to upgrade and resume 1 idle agent task",
 	} {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("upgrade footer missing %q:\n%s", expected, got)
@@ -971,7 +975,7 @@ func TestClientUpgradeBannerOpensUpgradeResumeConfirm(t *testing.T) {
 		weftversion.Version,
 		"Enter upgrade",
 		"saved session IDs",
-		"fresh Codex tasks without one",
+		"fresh agent tasks without one",
 		"restarts idle shell task(s) with saved history/cwd",
 		"Shell jobs, env",
 		"mutations",
@@ -1041,7 +1045,7 @@ func TestClientUpgradeWaitsUntilTaskIsIdleAndResumable(t *testing.T) {
 	})
 
 	got := ansi.Strip(model.View())
-	for _, expected := range []string{"Upgrade pending", "Wait for 1 Codex task(s) to become idle", "Press U to schedule auto-upgrade when ready"} {
+	for _, expected := range []string{"Upgrade pending", "Wait for 1 agent task(s) to become idle", "Press U to schedule auto-upgrade when ready"} {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("upgrade wait copy missing %q:\n%s", expected, got)
 		}
@@ -1156,7 +1160,7 @@ func TestClientUpgradeAllowsFreshCodexWithoutSession(t *testing.T) {
 		"Upgrade ready",
 		"supervisor 3.9.0",
 		weftversion.Version,
-		"Press U to upgrade and start 1 fresh Codex task",
+		"Press U to upgrade and start 1 fresh agent task",
 	} {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("fresh upgrade footer missing %q:\n%s", expected, got)
@@ -1310,7 +1314,7 @@ func TestClientUpgradeBlockerResolvesTaskTitleTemplate(t *testing.T) {
 	})
 
 	got := ansi.Strip(model.View())
-	for _, expected := range []string{"Upgrade pending", "Wait for 1 Codex task(s) to become idle", "Blocking:", "- workspace: Core", "  task: Working Fix config"} {
+	for _, expected := range []string{"Upgrade pending", "Wait for 1 agent task(s) to become idle", "Blocking:", "- workspace: Core", "  task: Working Fix config"} {
 		if !strings.Contains(got, expected) {
 			t.Fatalf("running Codex footer missing %q:\n%s", expected, got)
 		}
@@ -2462,6 +2466,35 @@ func TestIPCNewCreatesRequestedTaskType(t *testing.T) {
 	}
 }
 
+func TestIPCNewCreatesClaudeTaskWithStableSession(t *testing.T) {
+	model := testModelWithTask(t)
+	defer killPTYs(model)
+	model.state.Tasks = nil
+	model.state.ActiveTaskID = ""
+
+	response, cmd := model.handleIPC(ipc.Request{Command: "new", Args: map[string]string{"type": config.DefaultTaskTypeClaude}})
+	defer killPTYs(model)
+
+	if !response.OK || cmd == nil {
+		t.Fatalf("new response/cmd = %#v/%v", response, cmd)
+	}
+	if len(model.state.Tasks) != 1 {
+		t.Fatalf("tasks = %#v", model.state.Tasks)
+	}
+	task := model.state.Tasks[0]
+	if task.TypeID != config.DefaultTaskTypeClaude || task.Title != "Claude {status}" || task.ResumeID == "" {
+		t.Fatalf("claude task = %#v", task)
+	}
+	if got := model.taskCommandForTask(task.ID); !strings.Contains(got, "--session-id '"+task.ResumeID+"'") {
+		t.Fatalf("claude start command = %q", got)
+	}
+	task.Status = state.StatusReady
+	model.state.Tasks[0] = task
+	if got := model.taskCommandForTask(task.ID); !strings.Contains(got, "--resume '"+task.ResumeID+"'") {
+		t.Fatalf("claude resume command = %q", got)
+	}
+}
+
 func TestIPCNewCreatesSilentTask(t *testing.T) {
 	model := testModelWithTask(t)
 	defer killPTYs(model)
@@ -2677,6 +2710,12 @@ func TestIPCTaskContextRejectsShellTasksAndDisabledConfig(t *testing.T) {
 		t.Fatalf("shell task notes response = %#v", response)
 	}
 
+	model.state.Tasks[0].TypeID = config.DefaultTaskTypeClaude
+	response, _ = model.handleIPC(ipc.Request{Command: "task_context_set", Args: map[string]string{"content": "claude note"}})
+	if !response.OK {
+		t.Fatalf("claude task notes response = %#v", response)
+	}
+
 	model.state.Tasks[0].TypeID = config.DefaultTaskTypeCodex
 	model.cfg.TaskContext.Enabled = false
 	response, _ = model.handleIPC(ipc.Request{Command: "task_context_set", Args: map[string]string{"content": "note"}})
@@ -2702,13 +2741,19 @@ func TestTaskContextClearsWhenTaskCloses(t *testing.T) {
 	}
 }
 
-func TestTaskEnvForCodexTaskOnly(t *testing.T) {
+func TestTaskEnvForAgentTasksOnly(t *testing.T) {
 	model := testModelWithTask(t)
 	defer killPTYs(model)
 
 	env := model.taskEnvForTask("a")
 	if env[config.AppDirEnv] != model.runtime.Dir || env["WEFT_TASK_ID"] != "a" || env["WEFT_TASK_TYPE_ID"] != config.DefaultTaskTypeCodex || env["WEFT_TASK_KIND"] != config.TaskKindCodex {
 		t.Fatalf("codex task env = %#v", env)
+	}
+
+	model.state.Tasks[0].TypeID = config.DefaultTaskTypeClaude
+	env = model.taskEnvForTask("a")
+	if env[config.AppDirEnv] != model.runtime.Dir || env["WEFT_TASK_ID"] != "a" || env["WEFT_TASK_TYPE_ID"] != config.DefaultTaskTypeClaude || env["WEFT_TASK_KIND"] != config.TaskKindClaude {
+		t.Fatalf("claude task env = %#v", env)
 	}
 
 	model.state.Tasks[0].TypeID = config.DefaultTaskTypeShell
